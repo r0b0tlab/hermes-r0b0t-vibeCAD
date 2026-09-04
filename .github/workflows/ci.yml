@@ -35,4 +35,10 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@22695119d769bdb6f7032ad67b9bca0ef8c4a174 # v5.4.0
-      - run: uv tool run --from "git+https://github.com/NousResearch/hermes-agent.git@13e72fb205b735df679e0fd5f5996a34ac4accc6" hermes plugins doctor . --ci
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 13e72fb205b735df679e0fd5f5996a34ac4accc6
+          path: hermes-agent
+      - run: uv sync --directory hermes-agent
+      - run: HERMES_HOME="$(mktemp -d)" hermes-agent/.venv/bin/hermes plugins doctor . --ci
