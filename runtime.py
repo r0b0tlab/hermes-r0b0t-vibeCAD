@@ -6,8 +6,10 @@ from typing import Any, Mapping
 
 from .config import ConfigError, Settings, settings_from_context
 from .exports import execute_and_export, inspect_metrics
+from .handoff import stage_for_slicer
 from .parameters import modify_parameter
 from .profiles import load_profile_catalog
+from .renders import generate_preview_renders
 
 CadError = ConfigError
 
@@ -33,15 +35,6 @@ def list_printer_profiles(settings: Settings, _args: Mapping[str, Any]) -> dict[
         }
     except Exception as exc:
         return {"success": False, "error": str(exc)}
-
-
-def _not_implemented(_settings: Settings, _args: Mapping[str, Any]) -> dict[str, Any]:
-    return {"success": False, "error": "This vibeCAD operation has not been implemented yet."}
-
-
-generate_preview_renders = _not_implemented
-modify_parameter = _not_implemented
-stage_for_slicer = _not_implemented
 
 __all__ = [
     "CadError",
