@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_DIRS = {"__pycache__", ".venv", "venv", ".pytest_cache"}
 FORBIDDEN_SUFFIXES = {".gcode", ".step", ".stp", ".stl", ".3mf", ".pdf"}
-FORBIDDEN_TEXT = ("/Users" + "/am", "ghp_", "BEGIN PRIVATE KEY")
+FORBIDDEN_TEXT = ("/Users" + "/am", "gh" + "p_", "BEGIN PRIVATE" + " KEY")
 
 
 def tracked_files() -> list[Path]:
