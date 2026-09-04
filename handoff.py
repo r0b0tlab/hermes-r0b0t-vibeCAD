@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from .config import ConfigError, Settings, ensure_workspace, project_dirs, project_root_for, resolve_profile, resolve_workspace_file
+from .config import ConfigError, Settings, cad_python, ensure_workspace, project_dirs, project_root_for, resolve_profile, resolve_workspace_file
 from .exports import ExportError, atomic_json, decode_json, inspect_step, run_cad, sha256
 from .geometry import GeometryError, fit_to_profile
 
@@ -115,7 +115,7 @@ def stage_for_slicer(settings: Settings, args: Mapping[str, Any]) -> dict[str, A
             staged_files.append(stl)
         multipart.unlink(missing_ok=True)
         staged_files.append(multipart)
-        result = decode_json(run_cad(settings, [str(settings.python_executable or ""), "-c", STAGE_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(step_file), "VIBECAD_SLICER_3MF": str(multipart), "VIBECAD_PART_MAP": json.dumps(parts)}), "generic slicer staging")
+        result = decode_json(run_cad(settings, [str(cad_python(settings)), "-c", STAGE_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(step_file), "VIBECAD_SLICER_3MF": str(multipart), "VIBECAD_PART_MAP": json.dumps(parts)}), "generic slicer staging")
         individual = result.get("individual_stls") or []
         if not multipart.is_file() or multipart.stat().st_size <= 0 or len(individual) != solids:
             raise HandoffError("generic multipart export did not produce every expected artifact")

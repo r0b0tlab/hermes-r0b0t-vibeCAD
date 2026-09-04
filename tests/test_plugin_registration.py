@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from .conftest import load_plugin
 
 
@@ -29,3 +31,6 @@ def test_registers_the_public_namespaced_toolset() -> None:
     ctx = FakeContext()
     plugin.register(ctx)
     assert set(ctx.tools) == EXPECTED_TOOLS
+    profile_payload = json.loads(ctx.tools["vibecad_list_printer_profiles"]({}))
+    assert profile_payload["success"] is True
+    assert {profile["id"] for profile in profile_payload["profiles"]} >= {"generic-fdm-220", "bambu-x2d"}
