@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_DIRS = {"__pycache__", ".venv", "venv", ".pytest_cache"}
 FORBIDDEN_SUFFIXES = {".gcode", ".step", ".stp", ".stl", ".3mf", ".pdf"}
+FORBIDDEN_FILENAMES = {"result.json"}
 FORBIDDEN_TEXT = ("/Users" + "/am", "gh" + "p_", "BEGIN PRIVATE" + " KEY")
 
 
@@ -23,9 +24,14 @@ def main() -> int:
     failures: list[str] = []
     for path in tracked_files():
         relative = path.relative_to(ROOT)
+        if not path.is_file():
+            failures.append(f"missing tracked file: {relative}")
+            continue
         if any(part in FORBIDDEN_DIRS for part in relative.parts):
             failures.append(f"forbidden directory: {relative}")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES:
+            failures.append(f"forbidden generated artifact: {relative}")
+        if relative.name in FORBIDDEN_FILENAMES:
             failures.append(f"forbidden generated artifact: {relative}")
         if path.suffix.lower() in {".py", ".md", ".yaml", ".yml", ".json", ".toml", ".ini"}:
             text = path.read_text(encoding="utf-8", errors="replace")

@@ -232,7 +232,7 @@ wheels = [
 
 [[package]]
 name = "hermes-r0b0t-vibecad"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 
 [package.optional-dependencies]

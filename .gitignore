@@ -15,4 +15,5 @@ htmlcov/
 *.jpg
 *.jpeg
 *.log
+result.json
 .DS_Store

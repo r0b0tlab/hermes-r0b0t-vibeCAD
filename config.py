@@ -33,13 +33,18 @@ def _timeout(value: Any, default: int = 120) -> int:
     return max(1, min(300, candidate))
 
 
+def _configured_executable(value: str) -> Path:
+    """Make a configured interpreter absolute without collapsing its venv symlink."""
+    return Path(os.path.abspath(str(Path(value).expanduser())))
+
+
 def settings_from_context(ctx: Any) -> Settings:
     workspace_raw = str(ctx.get_config("workspace_root", "~/vibecad-projects") or "~/vibecad-projects")
     python_raw = str(ctx.get_config("python_executable", "") or "").strip()
     profiles_raw = str(ctx.get_config("printer_profiles_file", "") or "").strip()
     return Settings(
         workspace_root=Path(workspace_raw).expanduser().resolve(strict=False),
-        python_executable=Path(python_raw).expanduser().resolve(strict=False) if python_raw else None,
+        python_executable=_configured_executable(python_raw) if python_raw else None,
         printer_profile=str(ctx.get_config("printer_profile", "") or "").strip(),
         printer_profiles_file=Path(profiles_raw).expanduser().resolve(strict=False) if profiles_raw else None,
         timeout_s=_timeout(ctx.get_config("timeout_s", 120)),
