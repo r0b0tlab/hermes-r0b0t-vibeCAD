@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "my-printer",
+      "display_name": "My FDM printer",
+      "technology": "fdm",
+      "bed": {
+        "shape": "rectangular",
+        "width_mm": 220.0,
+        "depth_mm": 220.0,
+        "height_mm": 250.0,
+        "safe_margin_mm": 2.0
+      },
+      "nozzle_diameter_mm": 0.4,
+      "min_layer_height_mm": 0.08,
+      "max_layer_height_mm": 0.32,
+      "tool_count": 1
+    }
+  ]
+}

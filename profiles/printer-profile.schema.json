@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hermes-r0b0t-vibeCAD FDM printer profiles",
+  "type": "object",
+  "required": ["schema_version", "profiles"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "display_name", "technology", "bed", "nozzle_diameter_mm", "min_layer_height_mm", "max_layer_height_mm", "tool_count"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+          "display_name": {"type": "string", "minLength": 1},
+          "technology": {"const": "fdm"},
+          "bed": {
+            "type": "object",
+            "required": ["shape", "width_mm", "depth_mm", "height_mm", "safe_margin_mm"],
+            "properties": {
+              "shape": {"const": "rectangular"},
+              "width_mm": {"type": "number", "exclusiveMinimum": 0},
+              "depth_mm": {"type": "number", "exclusiveMinimum": 0},
+              "height_mm": {"type": "number", "exclusiveMinimum": 0},
+              "safe_margin_mm": {"type": "number", "minimum": 0}
+            }
+          },
+          "nozzle_diameter_mm": {"type": "number", "exclusiveMinimum": 0},
+          "min_layer_height_mm": {"type": "number", "exclusiveMinimum": 0},
+          "max_layer_height_mm": {"type": "number", "exclusiveMinimum": 0},
+          "tool_count": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

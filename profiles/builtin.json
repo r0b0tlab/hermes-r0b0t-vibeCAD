@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "generic-fdm-220",
+      "display_name": "Generic Cartesian FDM 220 × 220 × 250",
+      "technology": "fdm",
+      "bed": {
+        "shape": "rectangular",
+        "width_mm": 220.0,
+        "depth_mm": 220.0,
+        "height_mm": 250.0,
+        "safe_margin_mm": 2.0
+      },
+      "nozzle_diameter_mm": 0.4,
+      "min_layer_height_mm": 0.08,
+      "max_layer_height_mm": 0.32,
+      "tool_count": 1
+    },
+    {
+      "id": "bambu-x2d",
+      "display_name": "Bambu Lab X2D dual-tool common envelope",
+      "technology": "fdm",
+      "bed": {
+        "shape": "rectangular",
+        "width_mm": 235.5,
+        "depth_mm": 256.0,
+        "height_mm": 256.0,
+        "safe_margin_mm": 0.0
+      },
+      "nozzle_diameter_mm": 0.4,
+      "min_layer_height_mm": 0.08,
+      "max_layer_height_mm": 0.32,
+      "tool_count": 2
+    }
+  ]
+}
