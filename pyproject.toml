@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-r0b0t-vibecad"
-version = "0.1.0"
+version = "0.1.1"
 description = "Profile-driven Hermes build123d plugin for generic FDM printer workflows"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

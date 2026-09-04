@@ -1,5 +1,5 @@
 name: hermes-r0b0t-vibeCAD
-version: 0.1.0
+version: 0.1.1
 description: "Profile-driven build123d CAD, validation, rendering, and generic slicer handoff for FDM printers."
 author: "r0b0t / Hermes Agent"
 license: MIT
@@ -13,6 +13,7 @@ provides_tools:
   - vibecad_generate_preview_renders
   - vibecad_modify_parameter
   - vibecad_stage_for_slicer
+  - vibecad_stage_for_bambu
 python_dependencies:
   - "build123d>=0.11.1,<0.12"
   - "trimesh>=4.12.2,<5"

@@ -104,6 +104,27 @@ VIBECAD_STAGE_FOR_SLICER_SCHEMA: dict[str, Any] = {
     },
 }
 
+VIBECAD_STAGE_FOR_BAMBU_SCHEMA: dict[str, Any] = {
+    "name": "vibecad_stage_for_bambu",
+    "description": "Optional Bambu Studio X2D adapter. Produces an X2D-aligned CLI/UI assembly recipe and named STL fallbacks after generic staging; it does not claim a native process project or live material binding.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path."},
+            "printer_profile": _PROFILE_ARG,
+            "plate_name": {"type": "string", "description": "Optional Bambu Studio plate label for the generated assembly recipe."},
+            "bambu_slots": {
+                "type": "object",
+                "description": "Every part label mapped to its positive Bambu filament slot number.",
+                "additionalProperties": {"type": "integer", "minimum": 1},
+            },
+            "solids_map": VIBECAD_STAGE_FOR_SLICER_SCHEMA["parameters"]["properties"]["solids_map"],
+        },
+        "required": ["step_file", "bambu_slots", "solids_map"],
+        "additionalProperties": False,
+    },
+}
+
 TOOL_DEFINITIONS = (
     ("vibecad_list_printer_profiles", VIBECAD_LIST_PRINTER_PROFILES_SCHEMA, "list_printer_profiles", "🖨️"),
     ("vibecad_execute_and_export", VIBECAD_EXECUTE_AND_EXPORT_SCHEMA, "execute_and_export", "⚙️"),
@@ -111,4 +132,5 @@ TOOL_DEFINITIONS = (
     ("vibecad_generate_preview_renders", VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA, "generate_preview_renders", "🖼️"),
     ("vibecad_modify_parameter", VIBECAD_MODIFY_PARAMETER_SCHEMA, "modify_parameter", "✏️"),
     ("vibecad_stage_for_slicer", VIBECAD_STAGE_FOR_SLICER_SCHEMA, "stage_for_slicer", "🧰"),
+    ("vibecad_stage_for_bambu", VIBECAD_STAGE_FOR_BAMBU_SCHEMA, "stage_for_bambu", "🛠️"),
 )

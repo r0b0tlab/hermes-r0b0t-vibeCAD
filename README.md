@@ -4,8 +4,9 @@ A standalone [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin
 
 ## Scope
 
-- Supports user-supplied FDM printer profiles.
-- Produces generic artifacts; it does not send prints or claim automatic slicer material assignments.
-- Does not support resin/SLA, SLS, CNC, or vendor-native project generation in v0.1.0.
+- Supports user-supplied rectangular FDM printer profiles.
+- Produces generic artifacts and never sends a print or claims automatic slicer material assignments.
+- Includes an optional **Bambu Studio X2D** handoff adapter: named component STLs, an X2D-aligned `bambu-assemble-list.json`, and a reviewable manual mapping manifest.
+- Does not support resin/SLA, SLS, CNC, printer dispatch, or automatic Bambu-native process-project generation.
 
-See `docs/INSTALL.md` and `docs/PRINTER_PROFILES.md` after installation.
+See [docs/INSTALL.md](docs/INSTALL.md), [docs/PRINTER_PROFILES.md](docs/PRINTER_PROFILES.md), and [docs/BAMBU_X2D.md](docs/BAMBU_X2D.md) after installation.

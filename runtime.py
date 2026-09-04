@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from .config import ConfigError, Settings, settings_from_context
 from .exports import execute_and_export, inspect_metrics
 from .handoff import stage_for_slicer
+from .bambu import stage_for_bambu
 from .parameters import modify_parameter
 from .profiles import load_profile_catalog
 from .renders import generate_preview_renders
@@ -46,4 +47,5 @@ __all__ = [
     "generate_preview_renders",
     "modify_parameter",
     "stage_for_slicer",
+    "stage_for_bambu",
 ]

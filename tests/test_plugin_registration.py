@@ -12,6 +12,7 @@ EXPECTED_TOOLS = {
     "vibecad_generate_preview_renders",
     "vibecad_modify_parameter",
     "vibecad_stage_for_slicer",
+    "vibecad_stage_for_bambu",
 }
 
 
