@@ -1,0 +1,42 @@
+name: hermes-r0b0t-vibeCAD
+version: 0.1.0
+description: "Profile-driven build123d CAD, validation, rendering, and generic slicer handoff for FDM printers."
+author: "r0b0t / Hermes Agent"
+license: MIT
+manifest_version: 2
+api_version: 1
+tags: [cad, build123d, 3d-printing, fdm, slicer]
+provides_tools:
+  - vibecad_list_printer_profiles
+  - vibecad_execute_and_export
+  - vibecad_inspect_metrics
+  - vibecad_generate_preview_renders
+  - vibecad_modify_parameter
+  - vibecad_stage_for_slicer
+python_dependencies:
+  - "build123d>=0.11.1,<0.12"
+  - "trimesh>=4.12.2,<5"
+  - "numpy>=2.5.2,<3"
+  - "Pillow>=12.3.0,<13"
+  - "lib3mf>=2.5.0,<3"
+config_schema:
+  workspace_root:
+    type: str
+    default: "~/vibecad-projects"
+    description: "Trusted workspace root containing CAD projects."
+  python_executable:
+    type: str
+    default: ""
+    description: "Python interpreter with the CAD extra installed; empty means current interpreter if dependencies are present."
+  printer_profile:
+    type: str
+    default: ""
+    description: "Required printer profile id used for fit and FDM checks."
+  printer_profiles_file:
+    type: str
+    default: ""
+    description: "Optional JSON printer-profile catalog; empty uses bundled profiles."
+  timeout_s:
+    type: int
+    default: 120
+    description: "Per-CAD subprocess timeout, clamped to 1..300 seconds."

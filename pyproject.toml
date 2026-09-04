@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27.0,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermes-r0b0t-vibecad"
+version = "0.1.0"
+description = "Profile-driven Hermes build123d plugin for generic FDM printer workflows"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "r0b0t" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+cad = [
+  "build123d>=0.11.1,<0.12",
+  "trimesh>=4.12.2,<5",
+  "numpy>=2.5.2,<3",
+  "Pillow>=12.3.0,<13",
+  "lib3mf>=2.5.0,<3",
+]
+test = ["pytest>=8.3.5,<9"]
+
+[tool.hatch.build]
+include = [
+  "plugin.yaml",
+  "__init__.py",
+  "*.py",
+  "profiles/*.json",
+  "scripts/*.py",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
