@@ -2,6 +2,7 @@
 
 ## 0.4.0 — reliability and Desktop audit
 
+- Make pytest's console entry point collect consistently regardless of checkout directory name; cover both identifier and hyphenated layouts.
 - Add true high-resolution front/back detail viewports and source/image hashes for close visual review; do not treat images as anatomy or printability certification.
 - Accept a local single-shell STL from a generator such as the optional Meshy plugin, validate basic mesh topology and printer envelope in the CAD sidecar, and publish a uniquely hash-bound, uniformly scaled geometry revision. Preview STEP and STL with the same renderer; native slicing and Meshy API calls remain separate.
 - Bind handoff labels to exact STEP solids and refuse invalid mappings, unknown support conversion, and Bambu profile overrides exceeding physical bed limits.
