@@ -24,6 +24,7 @@ jobs:
       - uses: astral-sh/setup-uv@22695119d769bdb6f7032ad67b9bca0ef8c4a174 # v5.4.0
       - run: uv sync --all-extras
       - run: uv run pytest -q
+      - run: node --experimental-vm-modules --test tests/desktop.test.mjs
       - run: python -m compileall -q .
       - run: python scripts/check_release_tree.py
 

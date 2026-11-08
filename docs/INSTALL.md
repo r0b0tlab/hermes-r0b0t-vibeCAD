@@ -26,6 +26,8 @@ hermes config set 'plugins.entries.hermes-r0b0t-vibeCAD.settings.printer_profile
 
 The example uses Python 3.12; substitute `python3.13` or an absolute path to a supported interpreter as needed. Bootstrap defaults to its own interpreter if `--python` is omitted, checks its version before creating the environment, and installs using pip (without upgrading pip). It is run from a source checkout, not from an installed wheel. The example paths are POSIX; on Windows use the venv's `Scripts/python.exe`.
 
+The plugin declares `python_runtime: external`: Hermes does **not** install the CAD libraries into its own environment. The bootstrap and `python_executable` configuration above are required unless the selected interpreter already has the CAD extra installed. This isolates OpenCascade and its dependencies from the host interpreter, which may be Python 3.14.
+
 The wheel can also be installed into a supported Python environment with `python -m pip install '.[cad]'` from the checkout and imported as `hermes_r0b0t_vibecad`. A wheel installation alone does not register a Hermes plugin: keep the source checkout linked in the Hermes plugins directory as shown above. The wheel's source mapping copies files even for an editable install; do not rely on `pip install -e` to reflect subsequent source edits.
 
 Use `scripts/init_printer_profile.py --output <path>` to create an editable printer profile, then set `printer_profiles_file` and `printer_profile` through `hermes config set`.

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import ConfigError, Settings, cad_python, ensure_workspace, project_dirs, project_root_for, resolve_workspace_file
-from .exports import ExportError, decode_json, run_cad
+from .exports import ExportError, decode_json, run_cad, sha256
 
 
 class RenderError(ValueError):
@@ -232,12 +232,15 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
             raise RenderError("part_colors must be an array of #RRGGBB strings")
         # A new invocation always gets fresh paths, so older MEDIA references
         # remain immutable even when the input STEP is replaced in place.
+        source_hash = sha256(step_file)
         render_id = uuid.uuid4().hex
         outputs = {view: str(render_dir / f"preview_{render_id}_{view}.png") for view in views}
         try:
             with tempfile.TemporaryDirectory(prefix=".vibecad-render-", dir=render_dir) as temporary:
                 completed = run_cad(settings, [str(cad_python(settings)), "-c", RENDER_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(step_file), "VIBECAD_RENDER_OUTPUTS": json.dumps(outputs), "VIBECAD_PART_COLORS": json.dumps(colors), "VIBECAD_RENDER_TEMP": temporary})
                 rendered = decode_json(completed, "preview rendering")
+                if sha256(step_file) != source_hash:
+                    raise RenderError("source STEP changed during preview rendering")
                 if rendered.get("outputs") != outputs:
                     raise RenderError("renderer returned unexpected output paths")
                 missing = [path for path in outputs.values() if not Path(path).is_file() or Path(path).stat().st_size == 0]
@@ -247,6 +250,6 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
             for path in outputs.values():
                 Path(path).unlink(missing_ok=True)
             raise
-        return {"success": True, "step_file": str(step_file), "renders": outputs, "media": [f"MEDIA:{path}" for path in outputs.values()]}
+        return {"success": True, "step_file": str(step_file), "source_step_sha256": source_hash, "renders": outputs, "media": [f"MEDIA:{path}" for path in outputs.values()]}
     except (ConfigError, ExportError, RenderError, OSError) as exc:
         return {"success": False, "error": str(exc)}

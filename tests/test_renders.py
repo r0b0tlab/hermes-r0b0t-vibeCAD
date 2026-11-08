@@ -140,6 +140,28 @@ def test_translated_nested_assembly_positions(tmp_path: Path) -> None:
     assert red_x.min() > blue_x.max() + 400
 
 
+def test_render_refuses_changed_step_and_removes_partial_previews(tmp_path: Path, monkeypatch) -> None:
+    import json
+    import subprocess
+    from vibecad_public_plugin import renders
+
+    step = tmp_path / "part.step"
+    step.write_bytes(b"before")
+
+    def fake_render(settings, argv, *, cwd, env_updates):
+        outputs = json.loads(env_updates["VIBECAD_RENDER_OUTPUTS"])
+        for output in outputs.values():
+            Path(output).write_bytes(b"fake image")
+        step.write_bytes(b"after")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"outputs": outputs}), "")
+
+    monkeypatch.setattr(renders, "run_cad", fake_render)
+    result = renders.generate_preview_renders(settings_for(tmp_path), {"step_file": str(step), "views": ["top"]})
+    assert result["success"] is False
+    assert "changed" in result["error"]
+    assert not list((tmp_path / "build").glob("preview_*.png"))
+
+
 def test_timeout_cleans_partial_outputs_and_temporaries(tmp_path: Path) -> None:
     settings = settings_for(tmp_path, timeout=1)
     path = tmp_path / "part.step"

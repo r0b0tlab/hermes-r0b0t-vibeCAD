@@ -9,6 +9,13 @@ from vibecad_public_plugin.scripts import bootstrap
 from vibecad_public_plugin.scripts.bootstrap import venv_python_path
 
 
+def test_manifest_declares_external_cad_runtime() -> None:
+    # CAD runs in a user-configured sidecar, not the Hermes host interpreter.
+    manifest = (Path(__file__).resolve().parents[1] / "plugin.yaml").read_text(encoding="utf-8")
+    assert "python_runtime: external" in manifest
+    assert "python_dependencies:" not in manifest
+
+
 def test_venv_python_path_is_portable(tmp_path: Path) -> None:
     assert venv_python_path(tmp_path / "cad", windows=False) == tmp_path / "cad" / "bin" / "python"
     assert venv_python_path(tmp_path / "cad", windows=True) == tmp_path / "cad" / "Scripts" / "python.exe"

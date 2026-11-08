@@ -67,7 +67,10 @@ def test_inspection_sums_disconnected_overlap_regions(tmp_path: Path) -> None:
     step = tmp_path / "overlap.step"
     export_step(Compound(children=[u_shape, bar]), step)
     inspected = inspect_metrics(make_settings(tmp_path), {"step_file": str(step)})
-    assert inspected["success"] is True, inspected
+    # The bar extends below the bed datum; inspection still returns metrics,
+    # but the integrated fit gate correctly reports failure.
+    assert inspected["success"] is False, inspected
+    assert inspected["printer_validation"] == "failed"
     assert inspected["metrics"]["n_solids"] == 2
     assert inspected["metrics"]["intersections"][0]["overlap_volume_mm3"] == pytest.approx(4.0)
 

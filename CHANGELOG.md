@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — reliability and Desktop audit
+
+- Bind handoff labels to exact STEP solids and refuse invalid mappings, unknown support conversion, and Bambu profile overrides exceeding physical bed limits.
+- Create revision-specific handoff artifacts and manifests bound to source, assembly and component hashes; fail without overwriting older ready handoffs.
+- Correct Unicode parameter editing, finite fit validation, disconnected overlap measurement and output directory confinement.
+- Use immutable preview paths, preserve assembly colors where available, refuse source changes during rendering, and scope the Desktop pane to the focused chat and observed result.
+- Add an importable wheel, tested bootstrap, explicit external CAD-runtime declaration, two-part demo, real CAD integration tests and a JavaScript Desktop harness.
+- Serialize cooperating export writers and roll back ordinary publication failures; stable-path exports remain neither reader-atomic nor crash-atomic.
+
 ## 0.3.0
 
 - Depth-test preview drawings and color them from the part, so an iso view is the model rather than overlapping slabs.
