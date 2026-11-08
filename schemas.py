@@ -46,13 +46,13 @@ VIBECAD_INSPECT_METRICS_SCHEMA: dict[str, Any] = {
 
 VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
     "name": "vibecad_generate_preview_renders",
-    "description": "Generate deterministic PNG previews from a verified STEP file without a slicer or printer dependency. On success, emit each string in media as its own line so Desktop and messaging can show the drawings. Paths are also in renders.",
+    "description": "Generate deterministic PNG previews from a verified STEP file without a slicer or printer dependency. Every call returns fresh unique paths in renders; use that view-to-path map rather than constructing filenames. On success, emit each string in media as its own line so Desktop and messaging can show the drawings.",
     "parameters": {
         "type": "object",
         "properties": {
             "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path."},
             "views": {"type": "array", "items": {"type": "string", "enum": ["iso", "top", "bottom", "front", "right"]}},
-            "part_colors": {"type": "array", "items": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}},
+            "part_colors": {"type": "array", "description": "Optional solid-color overrides in imported solid traversal order; repeated cyclically if shorter. Without overrides, use available STEP colors or neutral gray.", "items": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}},
         },
         "required": ["step_file"],
         "additionalProperties": False,

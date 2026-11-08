@@ -19,7 +19,9 @@ The plugin does not connect to a printer.
 
 After install, enable the Desktop column in Capabilities → Plugins (not Settings → Plugins), then reload desktop plugins. Preview PNGs are depth-tested. Emit each `media` line and Desktop labels the view inline. The vibeCAD pane follows the focused chat and shows views from its latest **observed** sheet, ordered by the gateway's session history. Open the transcript to mount its media cards; the pane is not a background history browser. It stays empty if it cannot verify order or identify a unique tool call; inline media still falls back to Desktop's built-in player. History is requested via the active gateway, so other connections may not be available.
 
-Desktop attributes each media path to the first tool result that named it. Distinct immutable output paths per render revision are required for correct provenance and historical images; overwriting a preview path cannot preserve earlier revisions.
+Every successful preview invocation writes new `preview_<unique-id>_<view>.png` paths: use the returned `renders` map rather than deriving filenames. Previous images are not overwritten when the same STEP path changes. Uncolored parts use neutral gray; otherwise STEP assembly/instance colors are used when exposed by build123d. `part_colors` overrides those colors in imported solid traversal order. Face-specific materials, transparency and coplanar relief contrast are not guaranteed. Previews are visual aids, not geometry validation; complex rendering remains bounded by `timeout_s`.
+
+For a reproducible 500,000-triangle raster-only stress check (two views, synthetic mesh, excludes STEP import), run `python tests/benchmark_render.py`.
 
 The JavaScript integration harness uses Node's standard library: `node --experimental-vm-modules --test tests/desktop.test.mjs`.
 

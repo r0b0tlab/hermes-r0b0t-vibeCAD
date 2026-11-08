@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
-import time
+import re
+import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -21,7 +22,7 @@ import json
 import math
 import os
 from pathlib import Path
-from build123d import export_stl, import_step
+from build123d import Location, export_stl, import_step
 from PIL import Image
 import numpy as np
 import trimesh
@@ -30,39 +31,55 @@ step_path = Path(os.environ["VIBECAD_STEP_FILE"])
 outputs = {name: Path(path) for name, path in json.loads(os.environ["VIBECAD_RENDER_OUTPUTS"]).items()}
 requested = json.loads(os.environ.get("VIBECAD_PART_COLORS", "[]"))
 shape = import_step(step_path)
-solids = list(shape.solids())
-if not solids:
+# Keep STEP assembly labels/colors instead of flattening away their metadata.
+def collect(node, inherited=None, parent_location=None):
+    if parent_location is None:
+        parent_location = Location()
+    paint = getattr(node, "color", None)
+    if paint is None:
+        paint = inherited
+    if node.children:
+        location = parent_location * node.location
+        for child in node.children:
+            yield from collect(child, paint, location)
+    else:
+        for solid in node.solids():
+            yield parent_location * solid, paint
+
+parts = list(collect(shape))
+if not parts:
     raise RuntimeError("STEP contains no solids")
 vertices_parts = []
 faces_parts = []
 part_faces = []
 offset = 0
-for index, solid in enumerate(solids):
-    temporary = step_path.parent / f".vibecad-render-{os.getpid()}-{index}.stl"
-    export_stl(solid, temporary, tolerance=0.03, angular_tolerance=0.15)
-    mesh = trimesh.load(temporary, force="mesh")
-    temporary.unlink(missing_ok=True)
+for index, (solid, _) in enumerate(parts):
+    temporary = Path(os.environ["VIBECAD_RENDER_TEMP"]) / f"{index}.stl"
+    try:
+        export_stl(solid, temporary, tolerance=0.03, angular_tolerance=0.15)
+        mesh = trimesh.load(temporary, force="mesh")
+    finally:
+        temporary.unlink(missing_ok=True)
     if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
         raise RuntimeError(f"solid {index + 1} triangulated empty")
     vertices_parts.append(np.asarray(mesh.vertices, dtype=float))
     faces_parts.append(np.asarray(mesh.faces, dtype=int) + offset)
-    part_faces.extend([index] * len(mesh.faces))
+    part_faces.append(np.full(len(mesh.faces), index, dtype=np.int32))
     offset += len(mesh.vertices)
 vertices = np.vstack(vertices_parts)
 faces = np.vstack(faces_parts)
-part_faces = np.asarray(part_faces, dtype=int)
+part_faces = np.concatenate(part_faces)
 
 def color(value):
     text = str(value).lstrip('#')
     if len(text) != 6:
         raise ValueError("part_colors entries must be #RRGGBB")
     return tuple(int(text[i:i+2], 16) for i in (0, 2, 4))
-palette = [color(v) for v in requested] if requested else [(0, 122, 61), (236, 236, 232)]
+palette = [color(v) for v in requested]
 
-def solid_rgb(solid, index):
+def solid_rgb(paint, index):
     if requested:
         return palette[index % len(palette)]
-    paint = getattr(solid, "color", None)
     if paint is not None:
         try:
             channels = tuple(paint)[:3]
@@ -71,9 +88,9 @@ def solid_rgb(solid, index):
                 return tuple(max(0, min(255, int(round(channel * scale)))) for channel in channels)
         except Exception:
             pass
-    return palette[index % len(palette)]
+    return (180, 180, 180)
 
-part_rgb = [solid_rgb(solid, index) for index, solid in enumerate(solids)]
+part_rgb = [solid_rgb(paint, index) for index, (_, paint) in enumerate(parts)]
 light = np.array([0.25, -0.35, 0.90], dtype=float)
 light /= np.linalg.norm(light)
 
@@ -101,7 +118,62 @@ def render(name, output):
     zbuf = np.full((side, side), -1e18)
     pixels = np.zeros((side, side, 3), dtype=np.uint8)
     pixels[:, :] = (247, 249, 251)
-    for face_index, tri in enumerate(faces):
+    # Bound fragment-grid allocations per chunk. Mesh and per-face arrays
+    # still scale with triangle count; the scalar path handles larger triangles.
+    tri_screen = screen[faces]
+    mins = np.maximum(np.floor(tri_screen.min(axis=1)).astype(np.int32), 0)
+    maxs = np.minimum(np.ceil(tri_screen.max(axis=1)).astype(np.int32), side - 1)
+    dims = maxs - mins + 1
+    small = (dims[:, 0] > 0) & (dims[:, 1] > 0) & (dims[:, 0] <= 8) & (dims[:, 1] <= 8)
+    small_indices = np.flatnonzero(small)
+    # Shading is constant per face, computed once in vectorized form.
+    edge_a = vertices[faces[:, 1]] - vertices[faces[:, 0]]
+    edge_b = vertices[faces[:, 2]] - vertices[faces[:, 0]]
+    normals = np.cross(edge_a, edge_b)
+    lengths = np.linalg.norm(normals, axis=1)
+    shade = 0.42 + 0.58 * np.abs(normals @ light) / np.maximum(lengths, 1e-30)
+    shade[lengths <= 1e-9] = 0.72
+    face_rgb = np.clip(np.rint(np.asarray(part_rgb)[part_faces] * shade[:, None]), 0, 255).astype(np.uint8)
+    dx = np.tile(np.arange(8), 8)
+    dy = np.repeat(np.arange(8), 8)
+    flat_z = zbuf.ravel()
+    flat_pixels = pixels.reshape(-1, 3)
+    for start in range(0, len(small_indices), 1024):
+        ids = small_indices[start:start + 1024]
+        pts = tri_screen[ids]
+        x = mins[ids, 0, None] + dx
+        y = mins[ids, 1, None] + dy
+        x0, y0 = pts[:, 0, 0, None], pts[:, 0, 1, None]
+        x1, y1 = pts[:, 1, 0, None], pts[:, 1, 1, None]
+        x2, y2 = pts[:, 2, 0, None], pts[:, 2, 1, None]
+        den = (y1-y2)*(x0-x2) + (x2-x1)*(y0-y2)
+        safe_den = np.where(np.abs(den) < 1e-8, 1, den)
+        w0 = ((y1-y2)*(x+0.5-x2) + (x2-x1)*(y+0.5-y2)) / safe_den
+        w1 = ((y2-y0)*(x+0.5-x2) + (x0-x2)*(y+0.5-y2)) / safe_den
+        w2 = 1-w0-w1
+        zs = depth[faces[ids]]
+        zz = w0*zs[:, 0, None] + w1*zs[:, 1, None] + w2*zs[:, 2, None]
+        mask = ((x <= maxs[ids, 0, None]) & (y <= maxs[ids, 1, None]) &
+                (np.abs(den) >= 1e-8) & (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4))
+        pix = (y * side + x)[mask]
+        zz = zz[mask]
+        face_ids = np.broadcast_to(ids[:, None], mask.shape)[mask]
+        if not len(pix):
+            continue
+        # Select closest fragment, breaking equal-depth ties by lowest face id.
+        best = np.full(side * side, -1e18)
+        np.maximum.at(best, pix, zz)
+        eligible = (zz == best[pix]) & (zz > flat_z[pix])
+        pix, face_ids = pix[eligible], face_ids[eligible]
+        if len(pix):
+            order = np.lexsort((face_ids, pix))
+            pix, face_ids = pix[order], face_ids[order]
+            first = np.r_[True, pix[1:] != pix[:-1]]
+            pix, face_ids = pix[first], face_ids[first]
+            flat_z[pix] = best[pix]
+            flat_pixels[pix] = face_rgb[face_ids]
+    for face_index in np.flatnonzero(~small):
+        tri = faces[face_index]
         pts = screen[tri]
         zs = depth[tri]
         minx = max(int(np.floor(pts[:, 0].min())), 0)
@@ -129,15 +201,7 @@ def render(name, output):
             continue
         window[mask] = zz[mask]
         zbuf[miny:maxy + 1, minx:maxx + 1] = window
-        edge_a = vertices[tri[1]] - vertices[tri[0]]
-        edge_b = vertices[tri[2]] - vertices[tri[0]]
-        normal = np.cross(edge_a, edge_b)
-        norm = float(np.linalg.norm(normal))
-        shade = 0.72
-        if norm > 1e-9:
-            shade = 0.42 + 0.58 * abs(float(np.dot(normal / norm, light)))
-        base = part_rgb[int(part_faces[face_index])]
-        pixels[miny:maxy + 1, minx:maxx + 1][mask] = tuple(max(0, min(255, int(round(channel * shade)))) for channel in base)
+        pixels[miny:maxy + 1, minx:maxx + 1][mask] = face_rgb[face_index]
     output.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(pixels, mode="RGB").save(output)
 
@@ -150,7 +214,7 @@ print(json.dumps({"outputs": {name: str(path) for name, path in outputs.items()}
 def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dict[str, Any]:
     try:
         step_file = resolve_workspace_file(args.get("step_file"), settings, suffixes={".step", ".stp"})
-        requested = args.get("views") or ["iso", "top", "bottom", "front", "right"]
+        requested = args.get("views", ["iso", "top", "bottom", "front", "right"])
         if not isinstance(requested, list) or not requested:
             raise RenderError("views must be a non-empty array")
         allowed = {"iso", "top", "bottom", "front", "right"}
@@ -163,12 +227,26 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
                 views.append(view)
         project = project_root_for(step_file, ensure_workspace(settings))
         _exports, render_dir = project_dirs(project)
-        outputs = {view: str(render_dir / f"preview_{view}.png") for view in views}
-        completed = run_cad(settings, [str(cad_python(settings)), "-c", RENDER_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(step_file), "VIBECAD_RENDER_OUTPUTS": json.dumps(outputs), "VIBECAD_PART_COLORS": json.dumps(args.get("part_colors") or [])})
-        rendered = decode_json(completed, "preview rendering")
-        missing = [path for path in outputs.values() if not Path(path).is_file() or Path(path).stat().st_size == 0]
-        if missing:
-            raise RenderError(f"renderer did not create: {missing}")
-        return {"success": True, "step_file": str(step_file), "renders": rendered["outputs"], "media": [f"MEDIA:{path}" for path in rendered["outputs"].values()]}
-    except (ConfigError, ExportError, RenderError) as exc:
+        colors = args.get("part_colors", [])
+        if not isinstance(colors, list) or any(not isinstance(c, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", c) for c in colors):
+            raise RenderError("part_colors must be an array of #RRGGBB strings")
+        # A new invocation always gets fresh paths, so older MEDIA references
+        # remain immutable even when the input STEP is replaced in place.
+        render_id = uuid.uuid4().hex
+        outputs = {view: str(render_dir / f"preview_{render_id}_{view}.png") for view in views}
+        try:
+            with tempfile.TemporaryDirectory(prefix=".vibecad-render-", dir=render_dir) as temporary:
+                completed = run_cad(settings, [str(cad_python(settings)), "-c", RENDER_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(step_file), "VIBECAD_RENDER_OUTPUTS": json.dumps(outputs), "VIBECAD_PART_COLORS": json.dumps(colors), "VIBECAD_RENDER_TEMP": temporary})
+                rendered = decode_json(completed, "preview rendering")
+                if rendered.get("outputs") != outputs:
+                    raise RenderError("renderer returned unexpected output paths")
+                missing = [path for path in outputs.values() if not Path(path).is_file() or Path(path).stat().st_size == 0]
+                if missing:
+                    raise RenderError(f"renderer did not create: {missing}")
+        except (ExportError, RenderError, OSError):
+            for path in outputs.values():
+                Path(path).unlink(missing_ok=True)
+            raise
+        return {"success": True, "step_file": str(step_file), "renders": outputs, "media": [f"MEDIA:{path}" for path in outputs.values()]}
+    except (ConfigError, ExportError, RenderError, OSError) as exc:
         return {"success": False, "error": str(exc)}
