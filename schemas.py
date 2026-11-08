@@ -46,11 +46,12 @@ VIBECAD_INSPECT_METRICS_SCHEMA: dict[str, Any] = {
 
 VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
     "name": "vibecad_generate_preview_renders",
-    "description": "Generate depth-tested PNG previews or enlarged detail viewports from a trusted STEP file. Images are visual aids, not dimensional, printability or anatomy certification. Returns fresh paths, source and image SHA-256 hashes and view/region metadata; use renders instead of constructing filenames. Emit each media string on its own line.",
+    "description": "Generate depth-tested PNG previews or enlarged detail viewports from exactly one trusted STEP or STL file. STL preview is geometry only and does not check printability. Images are visual aids, not dimensional, printability or anatomy certification. Returns fresh paths, source and image SHA-256 hashes and view/region metadata; use renders instead of constructing filenames. Emit each media string on its own line.",
     "parameters": {
         "type": "object",
         "properties": {
-            "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path."},
+            "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path. Supply exactly one of step_file or mesh_file."},
+            "mesh_file": {"type": "string", "description": "Absolute or workspace-relative STL file path. Supply exactly one of mesh_file or step_file."},
             "views": {"type": "array", "minItems": 1, "description": "Orthographic views. Front looks from -Y with +X right; back looks from +Y with -X right. Default remains iso, top, bottom, front, right.", "items": {"type": "string", "enum": ["iso", "top", "bottom", "front", "back", "right"]}},
             "region": {
                 "type": "object",
@@ -65,7 +66,7 @@ VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
             "resolution": {"type": "integer", "minimum": 800, "maximum": 2048, "description": "Square output pixels per side; default 800 for full-frame, 1600 for detail. Scene is rasterized at this resolution, not upscaled."},
             "part_colors": {"type": "array", "description": "Optional solid-color overrides in imported solid traversal order; repeated cyclically if shorter. Without overrides, use available STEP colors or neutral gray.", "items": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}},
         },
-        "required": ["step_file"],
+        "anyOf": [{"required": ["step_file"]}, {"required": ["mesh_file"]}],
         "additionalProperties": False,
     },
 }
@@ -137,6 +138,16 @@ VIBECAD_STAGE_FOR_BAMBU_SCHEMA: dict[str, Any] = {
     },
 }
 
+VIBECAD_PREPARE_MESH_SCHEMA: dict[str, Any] = {
+    "name": "vibecad_prepare_mesh",
+    "description": "Validate and uniformly size a local single-shell STL (for example a Meshy export) in the configured CAD sidecar. Returns a hash-bound STL revision and manifest; not a STEP solid, slicer project, repair, anatomy review, or proof of manufacturability.",
+    "parameters": {"type": "object", "properties": {
+        "mesh_file": {"type": "string", "description": "Existing STL under the configured project workspace; no symlinks."},
+        "height_mm": {"type": "number", "exclusiveMinimum": 0, "description": "Desired Z height in millimeters, preserving the existing pose and uniform proportions."},
+        "printer_profile": _PROFILE_ARG,
+    }, "required": ["mesh_file", "height_mm"], "additionalProperties": False},
+}
+
 TOOL_DEFINITIONS = (
     ("vibecad_list_printer_profiles", VIBECAD_LIST_PRINTER_PROFILES_SCHEMA, "list_printer_profiles", "🖨️"),
     ("vibecad_execute_and_export", VIBECAD_EXECUTE_AND_EXPORT_SCHEMA, "execute_and_export", "⚙️"),
@@ -144,5 +155,6 @@ TOOL_DEFINITIONS = (
     ("vibecad_generate_preview_renders", VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA, "generate_preview_renders", "🖼️"),
     ("vibecad_modify_parameter", VIBECAD_MODIFY_PARAMETER_SCHEMA, "modify_parameter", "✏️"),
     ("vibecad_stage_for_slicer", VIBECAD_STAGE_FOR_SLICER_SCHEMA, "stage_for_slicer", "🧰"),
+    ("vibecad_prepare_mesh", VIBECAD_PREPARE_MESH_SCHEMA, "prepare_mesh", "🧩"),
     ("vibecad_stage_for_bambu", VIBECAD_STAGE_FOR_BAMBU_SCHEMA, "stage_for_bambu", "🛠️"),
 )

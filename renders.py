@@ -35,7 +35,6 @@ requested = json.loads(os.environ.get("VIBECAD_PART_COLORS", "[]"))
 render_views = json.loads(os.environ.get("VIBECAD_RENDER_VIEWS", "{}"))
 region = json.loads(os.environ.get("VIBECAD_RENDER_REGION", "null"))
 side = int(os.environ.get("VIBECAD_RENDER_RESOLUTION", "800"))
-shape = import_step(step_path)
 # Keep STEP assembly labels/colors instead of flattening away their metadata.
 def collect(node, inherited=None, parent_location=None):
     if parent_location is None:
@@ -51,29 +50,39 @@ def collect(node, inherited=None, parent_location=None):
         for solid in node.solids():
             yield parent_location * solid, paint
 
-parts = list(collect(shape))
-if not parts:
-    raise RuntimeError("STEP contains no solids")
-vertices_parts = []
-faces_parts = []
-part_faces = []
-offset = 0
-for index, (solid, _) in enumerate(parts):
-    temporary = Path(os.environ["VIBECAD_RENDER_TEMP"]) / f"{index}.stl"
-    try:
-        export_stl(solid, temporary, tolerance=0.03, angular_tolerance=0.15)
-        mesh = trimesh.load(temporary, force="mesh")
-    finally:
-        temporary.unlink(missing_ok=True)
-    if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
-        raise RuntimeError(f"solid {index + 1} triangulated empty")
-    vertices_parts.append(np.asarray(mesh.vertices, dtype=float))
-    faces_parts.append(np.asarray(mesh.faces, dtype=int) + offset)
-    part_faces.append(np.full(len(mesh.faces), index, dtype=np.int32))
-    offset += len(mesh.vertices)
-vertices = np.vstack(vertices_parts)
-faces = np.vstack(faces_parts)
-part_faces = np.concatenate(part_faces)
+if step_path.suffix.lower() == ".stl":
+    mesh = trimesh.load(step_path, force="mesh")
+    if len(mesh.vertices) == 0 or len(mesh.faces) == 0 or not np.isfinite(mesh.vertices).all():
+        raise RuntimeError("STL contains no valid finite triangles")
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    faces = np.asarray(mesh.faces, dtype=int)
+    part_faces = np.zeros(len(faces), dtype=np.int32)
+    parts = [(None, None)]
+else:
+    shape = import_step(step_path)
+    parts = list(collect(shape))
+    if not parts:
+        raise RuntimeError("STEP contains no solids")
+    vertices_parts = []
+    faces_parts = []
+    part_faces = []
+    offset = 0
+    for index, (solid, _) in enumerate(parts):
+        temporary = Path(os.environ["VIBECAD_RENDER_TEMP"]) / f"{index}.stl"
+        try:
+            export_stl(solid, temporary, tolerance=0.03, angular_tolerance=0.15)
+            mesh = trimesh.load(temporary, force="mesh")
+        finally:
+            temporary.unlink(missing_ok=True)
+        if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+            raise RuntimeError(f"solid {index + 1} triangulated empty")
+        vertices_parts.append(np.asarray(mesh.vertices, dtype=float))
+        faces_parts.append(np.asarray(mesh.faces, dtype=int) + offset)
+        part_faces.append(np.full(len(mesh.faces), index, dtype=np.int32))
+        offset += len(mesh.vertices)
+    vertices = np.vstack(vertices_parts)
+    faces = np.vstack(faces_parts)
+    part_faces = np.concatenate(part_faces)
 
 def color(value):
     text = str(value).lstrip('#')
@@ -237,7 +246,11 @@ print(json.dumps({"outputs": {name: str(path) for name, path in outputs.items()}
 
 def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dict[str, Any]:
     try:
-        step_file = resolve_workspace_file(args.get("step_file"), settings, suffixes={".step", ".stp"})
+        has_step, has_mesh = args.get("step_file") is not None, args.get("mesh_file") is not None
+        if has_step == has_mesh:
+            raise RenderError("provide exactly one of step_file or mesh_file")
+        step_file = resolve_workspace_file(args.get("step_file") if has_step else args.get("mesh_file"), settings,
+                                           suffixes={".step", ".stp"} if has_step else {".stl"})
         requested = args.get("views", ["iso", "top", "bottom", "front", "right"])
         if not isinstance(requested, list) or not requested:
             raise RenderError("views must be a non-empty array")
@@ -278,14 +291,14 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
         outputs = {name: str(render_dir / f"preview_{render_id}_{name}.png") for name in named_views}
         try:
             with tempfile.TemporaryDirectory(prefix=".vibecad-render-", dir=render_dir) as temporary:
-                snapshot = Path(temporary) / "source.step"
+                snapshot = Path(temporary) / ("source.step" if has_step else "source.stl")
                 shutil.copyfile(step_file, snapshot)
                 if sha256(snapshot) != source_hash:
-                    raise RenderError("source STEP changed during preview snapshot")
+                    raise RenderError(f"source {'STEP' if has_step else 'STL'} changed during preview snapshot")
                 completed = run_cad(settings, [str(cad_python(settings)), "-c", RENDER_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(snapshot), "VIBECAD_RENDER_OUTPUTS": json.dumps(outputs), "VIBECAD_RENDER_VIEWS": json.dumps(named_views), "VIBECAD_RENDER_REGION": json.dumps(region), "VIBECAD_RENDER_RESOLUTION": str(resolution), "VIBECAD_PART_COLORS": json.dumps(colors), "VIBECAD_RENDER_TEMP": temporary})
                 rendered = decode_json(completed, "preview rendering")
                 if sha256(step_file) != source_hash:
-                    raise RenderError("source STEP changed during preview rendering")
+                    raise RenderError(f"source {'STEP' if has_step else 'STL'} changed during preview rendering")
                 if rendered.get("outputs") != outputs:
                     raise RenderError("renderer returned unexpected output paths")
                 missing = [path for path in outputs.values() if not Path(path).is_file() or Path(path).stat().st_size == 0]
@@ -296,9 +309,14 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
             for path in outputs.values():
                 Path(path).unlink(missing_ok=True)
             raise
-        return {"success": True, "step_file": str(step_file), "source_step_sha256": source_hash, "renders": outputs,
-                "render_sha256": render_hashes,
-                "render_metadata": {name: {"view": view, "region": region, "resolution": resolution} for name, view in named_views.items()},
-                "media": [f"MEDIA:{path}" for path in outputs.values()]}
+        result = {"success": True, "source_sha256": source_hash, "renders": outputs,
+                  "render_sha256": render_hashes,
+                  "render_metadata": {name: {"view": view, "region": region, "resolution": resolution} for name, view in named_views.items()},
+                  "media": [f"MEDIA:{path}" for path in outputs.values()]}
+        if has_step:
+            result.update({"step_file": str(step_file), "source_step_sha256": source_hash})
+        else:
+            result["mesh_file"] = str(step_file)
+        return result
     except (ConfigError, ExportError, RenderError, OSError) as exc:
         return {"success": False, "error": str(exc)}

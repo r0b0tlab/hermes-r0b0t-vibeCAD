@@ -1,6 +1,6 @@
 name: hermes-r0b0t-vibeCAD
 version: 0.4.0
-description: "Profile-driven build123d CAD for FDM printers, with bed-fit refusals, preview drawings, and Bambu X2D / P2S AMS Combo handoffs. Executes trusted workspace models locally; does not dispatch prints or bind a live AMS."
+description: "Profile-driven build123d CAD and local STL mesh preparation for FDM printers, with bed-fit refusals, detail previews, and Bambu X2D / P2S handoffs. Executes trusted workspace models locally; does not dispatch prints or bind a live AMS."
 author: "r0b0t / Hermes Agent"
 license: MIT
 manifest_version: 2
@@ -14,6 +14,7 @@ provides_tools:
   - vibecad_generate_preview_renders
   - vibecad_modify_parameter
   - vibecad_stage_for_slicer
+  - vibecad_prepare_mesh
   - vibecad_stage_for_bambu
 # CAD dependencies are installed into the separately configured Python sidecar.
 python_runtime: external

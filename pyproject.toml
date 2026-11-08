@@ -53,6 +53,7 @@ only-include = ["hermes_r0b0t_vibecad"]
 "exports.py" = "hermes_r0b0t_vibecad/exports.py"
 "geometry.py" = "hermes_r0b0t_vibecad/geometry.py"
 "handoff.py" = "hermes_r0b0t_vibecad/handoff.py"
+"mesh_bridge.py" = "hermes_r0b0t_vibecad/mesh_bridge.py"
 "parameters.py" = "hermes_r0b0t_vibecad/parameters.py"
 "profiles.py" = "hermes_r0b0t_vibecad/profiles.py"
 "renders.py" = "hermes_r0b0t_vibecad/renders.py"
