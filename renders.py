@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import re
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -30,6 +32,9 @@ import trimesh
 step_path = Path(os.environ["VIBECAD_STEP_FILE"])
 outputs = {name: Path(path) for name, path in json.loads(os.environ["VIBECAD_RENDER_OUTPUTS"]).items()}
 requested = json.loads(os.environ.get("VIBECAD_PART_COLORS", "[]"))
+render_views = json.loads(os.environ.get("VIBECAD_RENDER_VIEWS", "{}"))
+region = json.loads(os.environ.get("VIBECAD_RENDER_REGION", "null"))
+side = int(os.environ.get("VIBECAD_RENDER_RESOLUTION", "800"))
 shape = import_step(step_path)
 # Keep STEP assembly labels/colors instead of flattening away their metadata.
 def collect(node, inherited=None, parent_location=None):
@@ -99,6 +104,7 @@ def projection(name):
     if name == "top": return np.column_stack((x, y)), z
     if name == "bottom": return np.column_stack((x, y)), -z
     if name == "front": return np.column_stack((x, z)), -y
+    if name == "back": return np.column_stack((-x, z)), y
     if name == "right": return np.column_stack((y, z)), x
     elevation = math.radians(30)
     screen_x = (x - y) / math.sqrt(2)
@@ -110,11 +116,19 @@ def render(name, output):
     projected, depth = projection(name)
     low, high = projected.min(axis=0), projected.max(axis=0)
     span = np.maximum(high - low, 1e-9)
-    side, pad = 800, 40
-    scale = min((side - 2 * pad) / span[0], (side - 2 * pad) / span[1])
+    # Construct exactly the historic 800px full frame first. The selected
+    # rectangle is a camera viewport, never a filter on the STEP geometry.
+    base, pad = 800, 40
+    scale = min((base - 2 * pad) / span[0], (base - 2 * pad) / span[1])
     screen = np.empty_like(projected)
     screen[:, 0] = pad + (projected[:, 0] - low[0]) * scale
-    screen[:, 1] = side - pad - (projected[:, 1] - low[1]) * scale
+    screen[:, 1] = base - pad - (projected[:, 1] - low[1]) * scale
+    bounds = (0.0, 0.0, 1.0, 1.0) if region is None else (region["x_min"], region["y_min"], region["x_max"], region["y_max"])
+    x0, y0, x1, y1 = bounds
+    zoom = side / (base * max(x1 - x0, y1 - y0))
+    if region is not None or side != base:
+        screen[:, 0] = (screen[:, 0] - base * (x0 + x1) / 2) * zoom + side / 2
+        screen[:, 1] = (screen[:, 1] - base * (y0 + y1) / 2) * zoom + side / 2
     zbuf = np.full((side, side), -1e18)
     pixels = np.zeros((side, side, 3), dtype=np.uint8)
     pixels[:, :] = (247, 249, 251)
@@ -202,11 +216,21 @@ def render(name, output):
         window[mask] = zz[mask]
         zbuf[miny:maxy + 1, minx:maxx + 1] = window
         pixels[miny:maxy + 1, minx:maxx + 1][mask] = face_rgb[face_index]
+    # Letterbox rectangular selections, after depth testing the entire scene.
+    if region is not None:
+        x0, y0, x1, y1 = bounds
+        width, height = side * (x1 - x0) / max(x1 - x0, y1 - y0), side * (y1 - y0) / max(x1 - x0, y1 - y0)
+        xx = np.arange(side) + 0.5
+        yy = np.arange(side) + 0.5
+        outside_x = (xx < (side-width)/2) | (xx >= (side+width)/2)
+        outside_y = (yy < (side-height)/2) | (yy >= (side+height)/2)
+        pixels[:, outside_x] = (247, 249, 251)
+        pixels[outside_y, :] = (247, 249, 251)
     output.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(pixels, mode="RGB").save(output)
 
 for name, output in outputs.items():
-    render(name, output)
+    render(render_views.get(name, name), output)
 print(json.dumps({"outputs": {name: str(path) for name, path in outputs.items()}}, sort_keys=True))
 '''
 
@@ -217,7 +241,7 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
         requested = args.get("views", ["iso", "top", "bottom", "front", "right"])
         if not isinstance(requested, list) or not requested:
             raise RenderError("views must be a non-empty array")
-        allowed = {"iso", "top", "bottom", "front", "right"}
+        allowed = {"iso", "top", "bottom", "front", "back", "right"}
         views: list[str] = []
         for raw in requested:
             view = str(raw).lower().strip()
@@ -230,14 +254,35 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
         colors = args.get("part_colors", [])
         if not isinstance(colors, list) or any(not isinstance(c, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", c) for c in colors):
             raise RenderError("part_colors must be an array of #RRGGBB strings")
+        region = args.get("region")
+        if "region" in args:
+            fields = {"label", "x_min", "y_min", "x_max", "y_max"}
+            if not isinstance(region, dict) or set(region) != fields:
+                raise RenderError("region must contain label, x_min, y_min, x_max, y_max")
+            if not isinstance(region["label"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}", region["label"]):
+                raise RenderError("region label must be 1-32 letters, digits, underscores or hyphens, starting with a letter or digit")
+            for field in ("x_min", "y_min", "x_max", "y_max"):
+                value = region[field]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:
+                    raise RenderError("region coordinates must be finite numbers between 0 and 1")
+            if region["x_max"] - region["x_min"] < 0.001 or region["y_max"] - region["y_min"] < 0.001:
+                raise RenderError("region width and height must each be at least 0.001")
+        resolution = args.get("resolution", 1600 if region is not None else 800)
+        if isinstance(resolution, bool) or not isinstance(resolution, int) or not 800 <= resolution <= 2048:
+            raise RenderError("resolution must be an integer from 800 to 2048")
         # A new invocation always gets fresh paths, so older MEDIA references
         # remain immutable even when the input STEP is replaced in place.
         source_hash = sha256(step_file)
         render_id = uuid.uuid4().hex
-        outputs = {view: str(render_dir / f"preview_{render_id}_{view}.png") for view in views}
+        named_views = {(f"{view}_detail_{region['label']}" if region is not None else view): view for view in views}
+        outputs = {name: str(render_dir / f"preview_{render_id}_{name}.png") for name in named_views}
         try:
             with tempfile.TemporaryDirectory(prefix=".vibecad-render-", dir=render_dir) as temporary:
-                completed = run_cad(settings, [str(cad_python(settings)), "-c", RENDER_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(step_file), "VIBECAD_RENDER_OUTPUTS": json.dumps(outputs), "VIBECAD_PART_COLORS": json.dumps(colors), "VIBECAD_RENDER_TEMP": temporary})
+                snapshot = Path(temporary) / "source.step"
+                shutil.copyfile(step_file, snapshot)
+                if sha256(snapshot) != source_hash:
+                    raise RenderError("source STEP changed during preview snapshot")
+                completed = run_cad(settings, [str(cad_python(settings)), "-c", RENDER_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(snapshot), "VIBECAD_RENDER_OUTPUTS": json.dumps(outputs), "VIBECAD_RENDER_VIEWS": json.dumps(named_views), "VIBECAD_RENDER_REGION": json.dumps(region), "VIBECAD_RENDER_RESOLUTION": str(resolution), "VIBECAD_PART_COLORS": json.dumps(colors), "VIBECAD_RENDER_TEMP": temporary})
                 rendered = decode_json(completed, "preview rendering")
                 if sha256(step_file) != source_hash:
                     raise RenderError("source STEP changed during preview rendering")
@@ -246,10 +291,14 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
                 missing = [path for path in outputs.values() if not Path(path).is_file() or Path(path).stat().st_size == 0]
                 if missing:
                     raise RenderError(f"renderer did not create: {missing}")
+                render_hashes = {name: sha256(Path(path)) for name, path in outputs.items()}
         except (ExportError, RenderError, OSError):
             for path in outputs.values():
                 Path(path).unlink(missing_ok=True)
             raise
-        return {"success": True, "step_file": str(step_file), "source_step_sha256": source_hash, "renders": outputs, "media": [f"MEDIA:{path}" for path in outputs.values()]}
+        return {"success": True, "step_file": str(step_file), "source_step_sha256": source_hash, "renders": outputs,
+                "render_sha256": render_hashes,
+                "render_metadata": {name: {"view": view, "region": region, "resolution": resolution} for name, view in named_views.items()},
+                "media": [f"MEDIA:{path}" for path in outputs.values()]}
     except (ConfigError, ExportError, RenderError, OSError) as exc:
         return {"success": False, "error": str(exc)}

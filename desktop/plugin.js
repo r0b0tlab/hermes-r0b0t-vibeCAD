@@ -7,7 +7,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 const sheets = sdk.atom({})
 const pending = new Map()
 const TOOL = 'vibecad_generate_preview_renders'
-const VIEW_ORDER = ['iso', 'top', 'front', 'right', 'bottom']
+const VIEW_ORDER = ['iso', 'top', 'front', 'back', 'right', 'bottom']
 
 function asObject(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value
@@ -23,6 +23,10 @@ function viewName(file, result) {
     for (const name of Object.keys(renders)) if (renders[name] === file.path) return name
   }
   return (file.name || '').replace(/^preview_/, '').replace(/\.png$/i, '') || 'drawing'
+}
+
+function displayName(name) {
+  return String(name).replace(/^(.+?)_detail_/, '$1 · detail: ').replaceAll('_', ' ')
 }
 
 function orderedNames(views) {
@@ -115,8 +119,8 @@ function DrawingCard({ file, result, fallback, sessionId, toolCallId }) {
   return jsxs('figure', {
     style: { margin: 0, maxWidth: 420, border: '1px solid var(--ui-stroke-secondary)', borderRadius: 8, overflow: 'hidden' },
     children: [
-      jsx('img', { alt: `${label} drawing`, src: loaded.url, onError: () => { removeView(sessionId, toolCallId, label, loaded.url); setLoaded(null) }, style: { display: 'block', width: '100%', height: 'auto' } }),
-      jsx('figcaption', { style: { color: 'var(--ui-text-secondary)', fontSize: 12, letterSpacing: '0.06em', padding: '6px 8px' }, children: String(label).toUpperCase() }),
+      jsx('img', { alt: `${displayName(label).replace(' · ', ' ')} drawing`, src: loaded.url, onError: () => { removeView(sessionId, toolCallId, label, loaded.url); setLoaded(null) }, style: { display: 'block', width: '100%', height: 'auto' } }),
+      jsx('figcaption', { style: { color: 'var(--ui-text-secondary)', fontSize: 12, letterSpacing: '0.06em', padding: '6px 8px' }, children: displayName(label).toUpperCase() }),
     ],
   })
 }
@@ -143,8 +147,8 @@ function DrawingPane() {
     children: names.map(name => jsxs('figure', {
       key: name, style: { margin: 0 },
       children: [
-        jsx('figcaption', { style: { color: 'var(--ui-text-secondary)', fontSize: 12, letterSpacing: '0.06em' }, children: name.toUpperCase() }),
-        jsx('img', { alt: `${name} drawing`, src: views[name].url, onError: () => removeView(id, session.selected, name, views[name].url), style: { display: 'block', width: '100%', height: 'auto' } }),
+        jsx('figcaption', { style: { color: 'var(--ui-text-secondary)', fontSize: 12, letterSpacing: '0.06em' }, children: displayName(name).toUpperCase() }),
+        jsx('img', { alt: `${displayName(name).replace(' · ', ' ')} drawing`, src: views[name].url, onError: () => removeView(id, session.selected, name, views[name].url), style: { display: 'block', width: '100%', height: 'auto' } }),
       ],
     })),
   })

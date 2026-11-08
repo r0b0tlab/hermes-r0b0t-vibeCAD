@@ -46,12 +46,23 @@ VIBECAD_INSPECT_METRICS_SCHEMA: dict[str, Any] = {
 
 VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
     "name": "vibecad_generate_preview_renders",
-    "description": "Generate deterministic PNG previews from a verified STEP file without a slicer or printer dependency. Every call returns fresh unique paths in renders; use that view-to-path map rather than constructing filenames. On success, emit each string in media as its own line so Desktop and messaging can show the drawings.",
+    "description": "Generate depth-tested PNG previews or enlarged detail viewports from a trusted STEP file. Images are visual aids, not dimensional, printability or anatomy certification. Returns fresh paths, source and image SHA-256 hashes and view/region metadata; use renders instead of constructing filenames. Emit each media string on its own line.",
     "parameters": {
         "type": "object",
         "properties": {
             "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path."},
-            "views": {"type": "array", "items": {"type": "string", "enum": ["iso", "top", "bottom", "front", "right"]}},
+            "views": {"type": "array", "minItems": 1, "description": "Orthographic views. Front looks from -Y with +X right; back looks from +Y with -X right. Default remains iso, top, bottom, front, right.", "items": {"type": "string", "enum": ["iso", "top", "bottom", "front", "back", "right"]}},
+            "region": {
+                "type": "object",
+                "description": "Optional detail viewport in normalized coordinates of each selected view's ordinary 800x800 full-frame preview, including its padding: (0,0) top-left, (1,1) bottom-right. Each extent must be >=0.001; rectangular selections are centered and letterboxed. Choose one view per call when regions differ.",
+                "properties": {
+                    "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$", "description": "Human-readable region identifier, e.g. face or contact_left; appears in result labels."},
+                    **{key: {"type": "number", "minimum": 0, "maximum": 1} for key in ("x_min", "y_min", "x_max", "y_max")},
+                },
+                "required": ["label", "x_min", "y_min", "x_max", "y_max"],
+                "additionalProperties": False,
+            },
+            "resolution": {"type": "integer", "minimum": 800, "maximum": 2048, "description": "Square output pixels per side; default 800 for full-frame, 1600 for detail. Scene is rasterized at this resolution, not upscaled."},
             "part_colors": {"type": "array", "description": "Optional solid-color overrides in imported solid traversal order; repeated cyclically if shorter. Without overrides, use available STEP colors or neutral gray.", "items": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}},
         },
         "required": ["step_file"],

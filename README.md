@@ -21,6 +21,20 @@ After install, enable the Desktop column in Capabilities → Plugins (not Settin
 
 Every successful preview invocation writes new `preview_<unique-id>_<view>.png` paths: use the returned `renders` map rather than deriving filenames. Previous images are not overwritten when the same STEP path changes. Uncolored parts use neutral gray; otherwise STEP assembly/instance colors are used when exposed by build123d. `part_colors` overrides those colors in imported solid traversal order. Face-specific materials, transparency and coplanar relief contrast are not guaranteed. Previews are visual aids, not geometry validation; complex rendering remains bounded by `timeout_s`.
 
+### Visual detail review
+
+On the final trusted STEP, first request `views: ["iso", "front", "back", "top"]` and actually inspect the images. Front looks from −Y with +X to the right; back looks from +Y with −X to the right. View directions use model axes, not inferred anatomy. Then request targeted details appropriate to the object: for a figure inspect face, both hands and attachment/contact points from relevant front and back angles; for other objects inspect critical joints, edges, openings and contacts. If a feature is hidden or ambiguous, choose another view or inspect geometry; a view does not reveal what is occluded. Note observed defects and uncertainty before describing quality, revise the model if needed, and repeat on the new STEP.
+
+Example tool input (coordinates are **illustrative**, not a detected face):
+
+```json
+{"step_file":"demo/exports/demo.step","views":["front"],"region":{"label":"face","x_min":0.35,"y_min":0.10,"x_max":0.65,"y_max":0.40},"resolution":1600}
+```
+
+The `region` is a rectangle in the selected view's normal **800 × 800 full-frame image**, including background padding: divide pixel coordinates by 800; `(0,0)` is top-left and `(1,1)` bottom-right. Each coordinate must be finite and between 0 and 1, and each extent at least 0.001. The label is 1–32 ASCII letters/digits/underscores/hyphens, starting with a letter or digit. The same rectangle is applied independently to every requested view, so use separate calls when their target locations differ. Rectangles are centered and letterboxed without distortion. `resolution` is an integer from 800 to 2048 pixels per side, defaulting to 1600 for a region or 800 for a full frame. The entire STEP scene is depth-tested into the enlarged viewport; geometry is not cropped before occlusion. This is a fresh rasterization, not an enlarged PNG, but fixed STEP tessellation, shading, occlusion and rendering timeout can still hide details.
+
+The response retains `renders` and `media`, and adds `source_step_sha256`, `render_sha256` (per returned label), and `render_metadata` (view, region, resolution). A detail label such as `front_detail_face` identifies both direction and selected region. The renderer reads a hash-checked temporary STEP snapshot and rejects an ordinary source change during rendering. Record hashes with observations and compare the current STEP hash before reusing findings; unique paths prevent this tool overwriting earlier previews but do not make files immutable against outside edits. Hashes identify bytes, not quality. Rendered images cannot certify dimensions, anatomy, strength, printability, or slicer toolpaths; use geometry/measurement and printability checks and inspect the actual slice separately.
+
 For a reproducible 500,000-triangle raster-only stress check (two views, synthetic mesh, excludes STEP import), run `python tests/benchmark_render.py`.
 
 The JavaScript integration harness uses Node's standard library: `node --experimental-vm-modules --test tests/desktop.test.mjs`.

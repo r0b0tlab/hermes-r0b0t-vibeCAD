@@ -57,6 +57,17 @@ const card = (env, { session = 'a', id = 'one', view = 'iso', renders, resolver,
 }
 const paneNames = env => { const result = env.pane.render(); return result.type === 'EmptyState' ? [] : Array.from(result.props.children, figure => figure.props.children[0].props.children) }
 
+test('detail payload labels and back view stay distinct in card and pane', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('detail'))
+  const renders = { front_detail_face: '/preview_a_front_detail_face.png', back_detail_face: '/preview_a_back_detail_face.png' }
+  const front = card(env, { id: 'detail', view: 'front_detail_face', renders })
+  const back = card(env, { id: 'detail', view: 'back_detail_face', renders })
+  front.component.render(); back.component.render(); await tick()
+  assert.equal(front.component.render().props.children[1].props.children, 'FRONT · DETAIL: FACE')
+  assert.equal(back.component.render().props.children[0].props.alt, 'back detail: face drawing')
+  assert.deepEqual(paneNames(env), ['BACK · DETAIL: FACE', 'FRONT · DETAIL: FACE'])
+})
+
 test('registration is scoped and compatible with old desktop', async () => {
   const env = await setup()
   assert.equal(env.registrations.length, 2)

@@ -172,6 +172,112 @@ def test_timeout_cleans_partial_outputs_and_temporaries(tmp_path: Path) -> None:
     assert not list((tmp_path / "build").glob(".vibecad-render-*"))
 
 
+def test_detail_regions_render_full_scene_at_high_resolution_and_hashes(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    # Both faces extend beyond the crop: an object outside the crop must still
+    # occlude one behind it; cropping geometry or vertices would lose the face.
+    front = colored_box((40, 2, 40), (0, -4, 0), "red")
+    back = colored_box((40, 2, 40), (0, 4, 0), "blue")
+    path = tmp_path / "occlusion.step"
+    export_step(Compound(children=[front, back]), path)
+    region = {"label": "contact", "x_min": 0.4, "y_min": 0.4, "x_max": 0.6, "y_max": 0.6}
+    result = generate_preview_renders(settings, {"step_file": str(path), "views": ["front", "back"], "region": region, "resolution": 1200})
+    assert result["success"], result
+    assert result["source_step_sha256"] == digest(str(path))
+    assert set(result["renders"]) == {"front_detail_contact", "back_detail_contact"}
+    for view, color in (("front", 0), ("back", 2)):
+        key = f"{view}_detail_contact"
+        png = result["renders"][key]
+        pixels = image(png)
+        assert pixels.shape == (1200, 1200, 3)
+        assert pixels[600, 600, color] > 100
+        assert pixels[600, 600, 2 - color] == 0
+        assert result["render_sha256"][key] == digest(png)
+        assert result["render_metadata"][key] == {"view": view, "region": region, "resolution": 1200}
+
+
+def test_full_frame_regression_and_pixel_region_mapping(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    path = tmp_path / "part.step"
+    export_step(colored_box((10, 10, 2), (0, 0, 0), "red"), path)
+    default = generate_preview_renders(settings, {"step_file": str(path), "views": ["top"]})
+    whole = generate_preview_renders(settings, {"step_file": str(path), "views": ["top"], "resolution": 800,
+        "region": {"label": "whole", "x_min": 0, "y_min": 0, "x_max": 1, "y_max": 1}})
+    assert default["success"] and whole["success"], (default, whole)
+    assert digest(default["renders"]["top"]) == digest(whole["renders"]["top_detail_whole"])
+    assert image(default["renders"]["top"]).shape == (800, 800, 3)
+    assert default["render_sha256"]["top"] == digest(default["renders"]["top"])
+
+
+def test_offcenter_rectangular_viewport_and_back_orientation(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    base = colored_box((40, 40, 2), (0, 0, 0), "blue")
+    mark = colored_box((2, 2, 2), (10, 0, 2), "red")
+    path = tmp_path / "mark.step"
+    export_step(Compound(children=[base, mark]), path)
+    # +X=10 projects at x=0.725 in the top full frame; retain the same
+    # full-scene geometry and frame the off-center mark, with letterboxing.
+    region = {"label": "mark", "x_min": 0.625, "y_min": 0.45, "x_max": 0.825, "y_max": 0.55}
+    result = generate_preview_renders(settings, {"step_file": str(path), "views": ["top"], "region": region, "resolution": 1200})
+    assert result["success"], result
+    pixels = image(result["renders"]["top_detail_mark"])
+    assert pixels[600, 600, 0] > 150 and pixels[600, 600, 2] == 0
+    assert tuple(pixels[100, 600]) == BACKGROUND and pixels[400, 600, 2] > 150
+    red = (pixels[:, :, 0] > 150) & (pixels[:, :, 2] == 0)
+    assert np.ptp(np.where(red)[1]) > 240
+
+    # Distinct colored objects show the expected horizontal flip on opposite
+    # views (the rear camera's right is -X, rather than a mirrored front).
+    left = colored_box((4, 4, 4), (-10, 0, 0), "red")
+    right = colored_box((4, 4, 4), (10, 0, 0), "blue")
+    export_step(Compound(children=[left, right]), path)
+    result = generate_preview_renders(settings, {"step_file": str(path), "views": ["front", "back"]})
+    assert result["success"], result
+    for view, reverse in (("front", False), ("back", True)):
+        img = image(result["renders"][view])
+        red_x = np.where((img[:, :, 0] > 100) & (img[:, :, 2] == 0))[1].mean()
+        blue_x = np.where((img[:, :, 2] > 100) & (img[:, :, 0] == 0))[1].mean()
+        assert (red_x > blue_x) == reverse
+
+
+def test_detail_rasterization_reveals_subpixel_feature(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    path = tmp_path / "fine.step"
+    base = colored_box((40, 40, 2), (0, 0, 0), "blue")
+    mark = colored_box((0.02, 0.02, 0.1), (0, 0, 2), "red")
+    export_step(Compound(children=[base, mark]), path)
+    full = generate_preview_renders(settings, {"step_file": str(path), "views": ["top"]})
+    region = {"label": "fine", "x_min": 0.4, "y_min": 0.4, "x_max": 0.6, "y_max": 0.6}
+    detail = generate_preview_renders(settings, {"step_file": str(path), "views": ["top"], "region": region, "resolution": 1200})
+    assert full["success"] and detail["success"], (full, detail)
+    full_pixels = image(full["renders"]["top"])
+    detail_pixels = image(detail["renders"]["top_detail_fine"])
+    red = lambda a: (a[:, :, 0] > 100) & (a[:, :, 2] == 0)
+    assert red(full_pixels).sum() == 0
+    assert red(detail_pixels).sum() >= 4
+
+
+@pytest.mark.parametrize("region", [None, {}, {"label": "face", "x_min": 0.5, "y_min": 0, "x_max": 0.4, "y_max": 1},
+    {"label": "face", "x_min": -0.1, "y_min": 0, "x_max": 1, "y_max": 1},
+    {"label": "face", "x_min": 0, "y_min": 0, "x_max": float("nan"), "y_max": 1},
+    {"label": "face", "x_min": True, "y_min": 0, "x_max": 1, "y_max": 1},
+    {"label": "../bad", "x_min": 0, "y_min": 0, "x_max": 1, "y_max": 1},
+    {"label": "tiny", "x_min": 0, "y_min": 0, "x_max": 0.00001, "y_max": 1}])
+def test_invalid_region_is_rejected_before_renderer(tmp_path: Path, region) -> None:
+    path = tmp_path / "empty.step"
+    path.touch()
+    result = generate_preview_renders(settings_for(tmp_path), {"step_file": str(path), "region": region})
+    assert not result["success"] and "region" in result["error"], result
+
+
+@pytest.mark.parametrize("resolution", [True, 799, 2049, 1000.5, "1200"])
+def test_invalid_resolution_is_rejected_before_renderer(tmp_path: Path, resolution) -> None:
+    path = tmp_path / "empty.step"
+    path.touch()
+    result = generate_preview_renders(settings_for(tmp_path), {"step_file": str(path), "resolution": resolution})
+    assert not result["success"] and "resolution" in result["error"], result
+
+
 @pytest.mark.parametrize("colors", [["red"], ["#GG0000"], "#ff0000", [1]])
 def test_invalid_color_requests_fail_before_render(tmp_path: Path, colors) -> None:
     settings = settings_for(tmp_path)
