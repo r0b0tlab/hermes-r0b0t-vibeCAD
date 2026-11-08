@@ -35,4 +35,8 @@ def register(ctx: Any) -> None:
     skill_md = Path(__file__).resolve().parent / "skills" / "fdm-handoff" / "SKILL.md"
     register_skill = getattr(ctx, "register_skill", None)
     if register_skill is not None and skill_md.is_file():
-        register_skill("fdm-handoff", skill_md)
+        try:
+            register_skill("fdm-handoff", skill_md)
+        except Exception:
+            # A skill registration failure must not drop the CAD tools.
+            pass

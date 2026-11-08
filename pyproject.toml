@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-r0b0t-vibecad"
-version = "0.2.0"
+version = "0.3.0"
 description = "Profile-driven Hermes build123d plugin for FDM printers, including Bambu X2D and P2S AMS Combo handoffs"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

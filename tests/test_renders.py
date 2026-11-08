@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 from vibecad_public_plugin.config import Settings
 from vibecad_public_plugin.runtime import execute_and_export, generate_preview_renders
 
@@ -32,3 +34,9 @@ def test_generates_requested_deterministic_png_views(tmp_path: Path) -> None:
         path = Path(image)
         assert path.is_file() and path.stat().st_size > 100
     assert rendered["media"] == [f"MEDIA:{path}" for path in rendered["renders"].values()]
+    top = Image.open(rendered["renders"]["top"]).convert("RGB")
+    colors = top.getcolors(maxcolors=200000) or []
+    green = sum(count for count, (r, g, b) in colors if g > r + 20 and g > b)
+    white = sum(count for count, (r, g, b) in colors if r > 200 and g > 200 and b > 200)
+    assert green > 500, "top view lost the lower part color"
+    assert white > 200, "top view lost the raised part"

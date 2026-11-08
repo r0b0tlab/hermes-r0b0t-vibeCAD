@@ -1,5 +1,5 @@
 name: hermes-r0b0t-vibeCAD
-version: 0.2.0
+version: 0.3.0
 description: "Profile-driven build123d CAD for FDM printers, with bed-fit refusals, preview drawings, and Bambu X2D / P2S AMS Combo handoffs. Executes trusted workspace models locally; does not dispatch prints or bind a live AMS."
 author: "r0b0t / Hermes Agent"
 license: MIT
@@ -33,7 +33,7 @@ config_schema:
   printer_profile:
     type: str
     default: ""
-    description: "Required printer profile id used for fit and FDM checks."
+    description: "Required printer profile id. Bundled ids: generic-fdm-220, bambu-x2d, bambu-p2s."
   printer_profiles_file:
     type: str
     default: ""

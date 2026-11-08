@@ -10,7 +10,7 @@ The plugin tools are the gate. A prose claim that a part fits, or a guessed AMS 
 
 1. `vibecad_list_printer_profiles` and use the selected id. `bambu-p2s` is the 256 × 256 × 256 mm single-nozzle P2S AMS Combo. `bambu-x2d` is the narrower dual-tool common envelope, not a synonym for P2S.
 2. After every geometry change, `vibecad_execute_and_export`. Require `success`, a valid STEP, and `printer_validation: passed` before using files.
-3. `vibecad_generate_preview_renders` for `iso`, `front`, and `top` at minimum. Then emit every string in that result's `media` array as its own line, with no extra path rewriting. Desktop turns those into inline drawings. Other surfaces attach the files.
+3. `vibecad_generate_preview_renders` for `iso`, `front`, and `top` at minimum. The PNGs are depth-tested drawings, not a triangle painter. Emit every string in that result's `media` array as its own line. Desktop labels them inline.
 4. Read `fdm_warnings`. They do not fail the export. Do not call a warning a measured wall thickness.
 5. Multi-material Bambu handoff is `vibecad_stage_for_bambu` with an exact `solids_map` and one positive `bambu_slots` entry per label.
    - P2S: every `tool` is `0` or omitted. Default slots are 1–4. Pass `ams_slot_capacity` only when the user has more than one AMS unit, and never above 20.

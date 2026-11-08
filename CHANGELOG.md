@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Depth-test preview drawings and color them from the part, so an iso view is the model rather than overlapping slabs.
+- Desktop drawing cards read a JSON tool result, label the view, and keep the built-in player until the image URL resolves.
+- A bundled-skill registration failure no longer drops the CAD tools.
+
 ## 0.2.0
 
 - Add a Bambu Lab P2S AMS Combo adapter: 256 mm cube, one 0.4 mm nozzle, default slots 1–4, explicit capacity up to 20.
