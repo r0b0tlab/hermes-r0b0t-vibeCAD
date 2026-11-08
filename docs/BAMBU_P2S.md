@@ -24,7 +24,7 @@ Studio's `machine_max_speed_x` of 1000 mm/s is a travel preset. The official too
 
 ## What the adapter writes
 
-Named STL fallbacks, `exports/bambu-assemble-list.json` centered at 128, 128, 0, and `exports/bambu-handoff.json` with `bambu_contract` and `p2s_contract`.
+Named STL fallbacks, `bambu-assemble-list.json` centered at 128, 128, 0, and `bambu-handoff.json` with `bambu_contract` and `p2s_contract`. Returned paths are revision-specific under `exports/handoff-revisions/<revision>/` (or `build/handoff-revisions/`); earlier revisions are not overwritten. See the [X2D workflow](BAMBU_X2D.md) for hash binding, exact STEP label identity and support-role limitations. A custom P2S profile cannot enlarge the physical adapter envelope.
 
 It does not send a print, infer a live AMS route, or claim that `slicer-handoff.3mf` is a Bambu-native project. A native archive is acceptable only after that Studio build's `--info` succeeds. This plugin does not run that command.
 

@@ -84,7 +84,7 @@ VIBECAD_STAGE_FOR_SLICER_SCHEMA: dict[str, Any] = {
             "printer_profile": _PROFILE_ARG,
             "solids_map": {
                 "type": "object",
-                "description": "Every labeled STEP solid mapped exactly once to material/color/tool metadata.",
+                "description": "Every STEP assembly node label must uniquely identify exactly one solid, and its solid_index must match that exact imported solid; ambiguous or unlabeled nodes are refused.",
                 "additionalProperties": {
                     "type": "object",
                     "properties": {
@@ -106,7 +106,7 @@ VIBECAD_STAGE_FOR_SLICER_SCHEMA: dict[str, Any] = {
 
 VIBECAD_STAGE_FOR_BAMBU_SCHEMA: dict[str, Any] = {
     "name": "vibecad_stage_for_bambu",
-    "description": "Optional Bambu Studio adapter for a profile that has a bundled adapter (bambu-x2d or bambu-p2s). Writes an assembly recipe and named STL fallbacks after generic staging. It does not export a native process project, bind a live AMS, or dispatch a print. P2S is single-nozzle; slots default to 1..4 unless ams_slot_capacity is set from 1 to 20.",
+    "description": "Optional Bambu Studio adapter for a profile that has a bundled adapter (bambu-x2d or bambu-p2s). Writes an assembly recipe and named STL fallbacks after generic staging. Support and support_interface roles are refused because Bambu subtype conversion is unverified. It does not export a native process project, bind a live AMS, or dispatch a print. P2S is single-nozzle; slots default to 1..4 unless ams_slot_capacity is set from 1 to 20.",
     "parameters": {
         "type": "object",
         "properties": {

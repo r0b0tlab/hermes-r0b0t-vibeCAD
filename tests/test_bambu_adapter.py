@@ -98,6 +98,9 @@ def test_stage_for_p2s_centers_on_128_and_rejects_second_nozzle(tmp_path: Path) 
     manifest = json.loads(Path(staged["bambu_handoff_manifest"]).read_text(encoding="utf-8"))
     assert manifest["bambu_contract"]["machine_name"] == "Bambu Lab P2S 0.4 nozzle"
     assert manifest["bambu_contract"]["slot_capacity"] == 4
+    import hashlib
+    assert manifest["generic_handoff_sha256"] == hashlib.sha256(Path(staged["handoff_manifest"]).read_bytes()).hexdigest()
+    assert manifest["bambu_assemble_list_sha256"] == hashlib.sha256(Path(staged["bambu_assemble_list"]).read_bytes()).hexdigest()
     assert "x2d_contract" not in manifest
     assert "auxiliary hotend" not in " ".join(manifest["manual_bambu_steps"]).lower()
     assert any("not auto-export" in item for item in manifest["limitations"])

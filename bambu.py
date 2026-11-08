@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
 from .adapters import AdapterError, BambuAdapter, load_adapters, require_adapter
-from .config import ConfigError, Settings, ensure_workspace, project_dirs, project_root_for, resolve_profile
-from .exports import atomic_json
+from .config import ConfigError, Settings, resolve_profile
+from .exports import atomic_json, sha256
 from .handoff import stage_for_slicer
 
 _X2D = load_adapters()["bambu-x2d"]
@@ -29,12 +31,9 @@ def _slots(raw: Any, labels: set[str]) -> dict[str, int]:
     normalized: dict[str, int] = {}
     for label in labels:
         value = raw.get(label)
-        if isinstance(value, bool):
+        if isinstance(value, bool) or not isinstance(value, int):
             raise BambuError(f"bambu slot for {label!r} must be a positive integer")
-        try:
-            slot = int(value)
-        except (TypeError, ValueError) as exc:
-            raise BambuError(f"bambu slot for {label!r} must be a positive integer") from exc
+        slot = value
         if slot < 1:
             raise BambuError(f"bambu slot for {label!r} must be >= 1")
         normalized[label] = slot
@@ -123,14 +122,31 @@ def _x2d_contract(adapter: BambuAdapter) -> dict[str, Any]:
 
 def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, Any]:
     """Create a Bambu-safe UI/CLI assembly recipe without claiming a native project."""
+    revision: Path | None = None
+    success = False
     try:
         profile = resolve_profile(settings, args)
         adapter = require_adapter(profile.id)
-        _reject_single_nozzle_tools(adapter, args.get("solids_map"))
+        raw_map = args.get("solids_map")
+        _reject_single_nozzle_tools(adapter, raw_map)
+        if isinstance(raw_map, Mapping):
+            for label, details in raw_map.items():
+                if isinstance(details, Mapping) and str(details.get("role") or "model").strip().lower() in {"support", "support_interface"}:
+                    raise BambuError(f"Bambu support role for {label!r} is not verified; refusing normal_part conversion")
         capacity = _capacity(adapter, args.get("ams_slot_capacity"))
-        generic = stage_for_slicer(settings, args)
+        fallback_plate = "vibeCAD X2D plate" if adapter.tool_model == "dual_shared_xy" else "vibeCAD P2S plate"
+        plate_name = _plate_name(args.get("plate_name"), fallback_plate)
+        if isinstance(raw_map, Mapping) and all(isinstance(label, str) for label in raw_map):
+            labels = set(raw_map)
+            slots = _slots(args.get("bambu_slots"), labels)
+            if capacity is not None:
+                for label, slot in slots.items():
+                    if slot > capacity:
+                        raise BambuError(f"bambu slot for {label!r} is {slot}, above slot capacity {capacity}")
+        generic = stage_for_slicer(settings, args, physical_volume=adapter.build_volume_mm, physical_tools=1 if adapter.tool_model == "single" else 2)
         if not generic.get("success"):
             return generic
+        revision = Path(generic["handoff_manifest"]).parent
 
         parts = list(generic["parts"])
         labels = {str(part["label"]) for part in parts}
@@ -144,13 +160,8 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             raise BambuError("generic staging did not produce one named STL fallback for every Bambu part")
 
         step_file = Path(str(generic["step_file"]))
-        workspace = ensure_workspace(settings)
-        project = project_root_for(step_file, workspace)
-        exports_dir, _renders_dir = project_dirs(project)
-        assemble_list = exports_dir / "bambu-assemble-list.json"
-        handoff_manifest = exports_dir / "bambu-handoff.json"
-        fallback_plate = "vibeCAD X2D plate" if adapter.tool_model == "dual_shared_xy" else "vibeCAD P2S plate"
-        plate_name = _plate_name(args.get("plate_name"), fallback_plate)
+        assemble_list = revision / "bambu-assemble-list.json"
+        handoff_manifest = revision / "bambu-handoff.json"
         center = adapter.plate_center_mm
 
         objects = []
@@ -186,6 +197,13 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             )
 
         atomic_json(assemble_list, {"plates": [{"plate_name": plate_name, "need_arrange": False, "objects": objects}]})
+        generic_manifest_path = Path(generic["handoff_manifest"])
+        generic_manifest = json.loads(generic_manifest_path.read_text(encoding="utf-8"))
+        if (sha256(step_file) != generic_manifest["source_step_sha256"]
+                or sha256(Path(generic_manifest["source_step_snapshot"])) != generic_manifest["source_step_sha256"]
+                or sha256(Path(generic_manifest["staged_3mf"])) != generic_manifest["staged_3mf_sha256"]
+                or any(sha256(Path(item["path"])) != item["sha256"] for item in generic_manifest["individual_stls"])):
+            raise BambuError("source or generic artifacts changed during Bambu staging")
         manual_steps = _manual_steps(adapter)
         limitations = _limitations()
         bambu_contract = {
@@ -200,8 +218,12 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             "schema_version": 2,
             "printer_profile": profile.id,
             "source_step": str(step_file),
+            "source_step_sha256": generic_manifest["source_step_sha256"],
+            "source_step_snapshot": generic_manifest["source_step_snapshot"],
             "generic_handoff": generic["handoff_manifest"],
+            "generic_handoff_sha256": sha256(generic_manifest_path),
             "bambu_assemble_list": str(assemble_list),
+            "bambu_assemble_list_sha256": sha256(assemble_list),
             "bambu_slots": slots,
             "parts": bambu_parts,
             "bambu_contract": bambu_contract,
@@ -237,6 +259,10 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             result["x2d_contract"] = manifest["x2d_contract"]
         if "p2s_contract" in manifest:
             result["p2s_contract"] = manifest["p2s_contract"]
+        success = True
         return result
-    except (ConfigError, BambuError, AdapterError) as exc:
+    except (ConfigError, BambuError, AdapterError, OSError, json.JSONDecodeError) as exc:
         return {"success": False, "error": str(exc), "printer_validation": "failed"}
+    finally:
+        if revision is not None and not success:
+            shutil.rmtree(revision, ignore_errors=True)

@@ -4,9 +4,11 @@
 
 ## What the adapter validates and creates
 
-1. It runs the generic STEP/STL/3MF staging gates first: valid B-rep, non-overlapping named solids, fit to the X2D common dual-nozzle envelope, and individual named STL fallbacks.
-2. It writes `exports/bambu-assemble-list.json`, an X2D-aligned Bambu Studio CLI assembly recipe using the requested 1-based Bambu filament slots.
-3. It writes `exports/bambu-handoff.json` with the part-to-slot/nozzle map, exact geometry constraints, and manual Studio steps.
+1. It validates slots and roles, then checks the STEP B-rep, non-overlap, exact named-node-to-solid identity, the selected profile, and the adapter's physical common dual-nozzle envelope.
+2. It writes `bambu-assemble-list.json`, an X2D-aligned Bambu Studio CLI assembly recipe using the requested 1-based Bambu filament slots.
+3. It writes `bambu-handoff.json` with the part-to-slot/nozzle map, geometry constraints, and manual Studio steps.
+
+Each successful call returns paths under a new `exports/handoff-revisions/<revision>/` directory (or `build/handoff-revisions/` for build-layout projects). Previously returned paths are not overwritten. The generic manifest hashes the STEP snapshot, 3MF and each STL; the Bambu manifest hashes the generic manifest and assembly recipe. Check hashes before use, particularly if files can be edited externally. A failed call does not replace a previous revision. `support` and `support_interface` roles are refused by the Bambu adapter because their recipe subtype conversion is not verified. User profile overrides cannot enlarge the adapter's physical envelope.
 
 It does **not** send a print, infer live AMS routes, bind a live material source, or claim that a generic 3MF carries Bambu process or nozzle assignments.
 
