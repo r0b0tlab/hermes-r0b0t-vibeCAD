@@ -6,8 +6,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
+import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -16,6 +21,7 @@ from .geometry import GeometryError, METRICS_PROGRAM, fit_to_profile, nozzle_war
 
 
 MAX_TOOL_TEXT = 12000
+MAX_CAPTURE_BYTES = 1024 * 1024
 
 
 class ExportError(ValueError):
@@ -32,12 +38,57 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
     environment.update({"PYTHONUNBUFFERED": "1", "MPLBACKEND": "Agg"})
     if env_updates:
         environment.update({key: str(value) for key, value in env_updates.items()})
+    environment["PYTHONNOUSERSITE"] = "1"
+    for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"):
+        environment.pop(key, None)
+
+    # Drain both pipes continuously while retaining only their beginning and end.
+    # This bounds memory even when trusted model code emits unlimited diagnostics.
+    captures: list[bytearray] = [bytearray(), bytearray()]
+    totals = [0, 0]
+
+    def drain(pipe: Any, index: int) -> None:
+        half = MAX_CAPTURE_BYTES // 2
+        while chunk := pipe.read(65536):
+            totals[index] += len(chunk)
+            captures[index].extend(chunk)
+            if len(captures[index]) > MAX_CAPTURE_BYTES:
+                captures[index][:] = captures[index][:half] + captures[index][-half:]
+        pipe.close()
+
+    def captured(index: int) -> str:
+        value = bytes(captures[index])
+        if totals[index] > MAX_CAPTURE_BYTES:
+            half = MAX_CAPTURE_BYTES // 2
+            value = value[:half] + b"\n... [capture truncated] ...\n" + value[-half:]
+        return value.decode("utf-8", errors="replace")
+
     try:
-        return subprocess.run(argv, cwd=str(cwd), env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=settings.timeout_s, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise ExportError(f"CAD subprocess exceeded {settings.timeout_s}s\nstdout:\n{bounded(exc.stdout if isinstance(exc.stdout, str) else '')}\nstderr:\n{bounded(exc.stderr if isinstance(exc.stderr, str) else '')}") from exc
+        process = subprocess.Popen(argv, cwd=str(cwd), env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=(os.name == "posix"))
     except OSError as exc:
         raise ExportError(f"could not start CAD subprocess: {exc}") from exc
+    threads = [threading.Thread(target=drain, args=(pipe, index), daemon=True) for index, pipe in enumerate((process.stdout, process.stderr))]
+    for thread in threads:
+        thread.start()
+    timed_out = False
+    try:
+        process.wait(timeout=settings.timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+        process.wait()
+    for thread in threads:
+        thread.join(timeout=1)
+    stdout, stderr = captured(0), captured(1)
+    if timed_out:
+        raise ExportError(f"CAD subprocess exceeded {settings.timeout_s}s\nstdout:\n{bounded(stdout)}\nstderr:\n{bounded(stderr)}")
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def decode_json(completed: subprocess.CompletedProcess[str], operation: str) -> dict[str, Any]:
@@ -112,6 +163,73 @@ def _status_path(exports_dir: Path) -> Path:
     return exports_dir / ".vibecad-status.json"
 
 
+@contextmanager
+def _publication_lock(exports_dir: Path):
+    """Serialize cooperating writers, including status, across processes."""
+    with (exports_dir / ".vibecad-publication.lock").open("a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0, os.SEEK_END)
+            if not handle.tell():
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            # LK_LOCK retries internally, then fails rather than hanging forever.
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _publish_artifacts(pairs: list[tuple[Path, Path]], exports_dir: Path) -> None:
+    """Replace a set with rollback on ordinary I/O errors; caller holds lock.
+
+    Stable individual paths cannot provide an atomic snapshot to unlocked readers
+    or recover automatically from a process/machine crash during publication.
+    """
+    backup_dir = Path(tempfile.mkdtemp(prefix=".vibecad-backup-", dir=exports_dir))
+    backups: dict[Path, Path | None] = {}
+    replaced: list[Path] = []
+    preserve_backup = False
+    try:
+        for _source, target in pairs:
+            if target.exists():
+                backup = backup_dir / target.name
+                shutil.copy2(target, backup)
+                backups[target] = backup
+            else:
+                backups[target] = None
+        for source, target in pairs:
+            os.replace(source, target)
+            replaced.append(target)
+    except OSError as exc:
+        failures = []
+        for target in reversed(replaced):
+            try:
+                backup = backups[target]
+                if backup is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, target)
+            except OSError as rollback_exc:
+                failures.append(f"{target}: {rollback_exc}")
+        if failures:
+            preserve_backup = True
+            raise ExportError(f"publication failed: {exc}; rollback failed: {'; '.join(failures)}; recovery backups retained at {backup_dir}") from exc
+        raise ExportError(f"publication failed; previous artifacts restored: {exc}") from exc
+    finally:
+        if not preserve_backup:
+            shutil.rmtree(backup_dir, ignore_errors=True)
+
+
 def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {"success": False}
     staged: list[Path] = []
@@ -150,19 +268,29 @@ def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str,
         meshed = decode_json(run_cad(settings, [str(cad_python(settings)), "-c", MESH_EXPORT_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(staged_step), "VIBECAD_STL_FILE": str(staged_stl), "VIBECAD_3MF_FILE": str(staged_3mf)}), "mesh export")
         if not all(path.is_file() and path.stat().st_size > 0 for path in staged):
             raise ExportError("validated build did not produce every staged artifact")
-        os.replace(staged_step, final_step)
-        os.replace(staged_stl, final_stl)
-        os.replace(staged_3mf, final_3mf)
         result.update({"success": True, "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": warnings, "mesh_export": meshed, "printer_validation": "passed"})
-    except (ConfigError, GeometryError, ExportError) as exc:
+        staged_status = exports_dir / f".vibecad-status.{nonce}.tmp"
+        staged.append(staged_status)
+        staged_status.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with _publication_lock(exports_dir):
+            _publish_artifacts(list(zip(staged[:3], [final_step, final_stl, final_3mf])) + [(staged_status, _status_path(exports_dir))], exports_dir)
+    except (ConfigError, GeometryError, ExportError, OSError) as exc:
+        result["success"] = False
         result["error"] = str(exc)
         result["printer_validation"] = "failed"
-        for artifact in staged:
-            artifact.unlink(missing_ok=True)
-    finally:
-        exports = Path(result.get("output", {}).get("step", ".")).parent if isinstance(result.get("output"), Mapping) else None
+        exports = Path(result["output"]["step"]).parent if isinstance(result.get("output"), Mapping) else None
         if exports and exports.is_dir():
-            atomic_json(_status_path(exports), result)
+            try:
+                with _publication_lock(exports):
+                    atomic_json(_status_path(exports), result)
+            except OSError as status_exc:
+                result["status_error"] = str(status_exc)
+    finally:
+        for artifact in staged:
+            try:
+                artifact.unlink(missing_ok=True)
+            except OSError:
+                pass
     return result
 
 
@@ -172,6 +300,7 @@ def inspect_metrics(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
         profile = resolve_profile(settings, args)
         metrics = inspect_step(step_file, settings)
         bed_fit = fit_to_profile(metrics, profile)
-        return {"success": bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": nozzle_warnings(metrics, profile), "printer_validation": "passed" if bed_fit["fits"] else "failed"}
+        valid = bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0 and bed_fit["fits"]
+        return {"success": valid, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": nozzle_warnings(metrics, profile), "printer_validation": "passed" if valid else "failed"}
     except (ConfigError, GeometryError, ExportError) as exc:
         return {"success": False, "error": str(exc), "printer_validation": "failed"}

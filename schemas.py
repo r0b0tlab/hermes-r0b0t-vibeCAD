@@ -17,7 +17,7 @@ VIBECAD_LIST_PRINTER_PROFILES_SCHEMA: dict[str, Any] = {
 
 VIBECAD_EXECUTE_AND_EXPORT_SCHEMA: dict[str, Any] = {
     "name": "vibecad_execute_and_export",
-    "description": "Run a trusted workspace build123d model, atomically export STEP/STL/generic 3MF, and validate the result against a selected FDM printer profile.",
+    "description": "Run a trusted workspace build123d model, export STEP/STL/generic 3MF with rollback on publication errors, and validate against a selected FDM printer profile.",
     "parameters": {
         "type": "object",
         "properties": {

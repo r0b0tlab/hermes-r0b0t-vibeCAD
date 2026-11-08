@@ -43,4 +43,6 @@ Resin/SLA, SLS, CNC, print dispatch, live AMS binding, native Bambu process proj
 
 Executes trusted Python inside the configured workspace. Reads and writes that workspace's `source/`, `exports/`, and `renders/`. Spawns the configured CAD interpreter as a subprocess. No network calls, no credentials, no telemetry, and no printer connection. The Desktop half only displays image files those tools already wrote.
 
+Export publication serializes cooperating writers and rolls back ordinary publication failures, retaining recovery backups if rollback itself fails. Existing STEP/STL/3MF paths are unchanged. They are replaced individually, so unlocked readers can observe a mixed set during publication; a process or machine crash can also interrupt the set. This is not a crash-atomic or reader-atomic transaction. The status file reports the latest completed attempt, including failures; it is not a versioned snapshot. CAD subprocesses ignore inherited Python path/home/user-site settings, and captured output is capped.
+
 See [docs/INSTALL.md](docs/INSTALL.md), [docs/PRINTER_PROFILES.md](docs/PRINTER_PROFILES.md), [docs/BAMBU_X2D.md](docs/BAMBU_X2D.md), and [docs/BAMBU_P2S.md](docs/BAMBU_P2S.md).
