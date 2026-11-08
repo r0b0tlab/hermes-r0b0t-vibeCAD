@@ -32,6 +32,22 @@
       "min_layer_height_mm": 0.08,
       "max_layer_height_mm": 0.32,
       "tool_count": 2
+    },
+    {
+      "id": "bambu-p2s",
+      "display_name": "Bambu Lab P2S AMS Combo 256 × 256 × 256",
+      "technology": "fdm",
+      "bed": {
+        "shape": "rectangular",
+        "width_mm": 256.0,
+        "depth_mm": 256.0,
+        "height_mm": 256.0,
+        "safe_margin_mm": 0.0
+      },
+      "nozzle_diameter_mm": 0.4,
+      "min_layer_height_mm": 0.08,
+      "max_layer_height_mm": 0.32,
+      "tool_count": 1
     }
   ]
 }

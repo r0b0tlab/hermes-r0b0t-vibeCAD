@@ -1,25 +1,26 @@
-"""Optional Bambu Studio X2D handoff layered on the generic FDM workflow."""
+"""Optional Bambu Studio handoff layered on the generic FDM workflow."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Mapping
 
+from .adapters import AdapterError, BambuAdapter, load_adapters, require_adapter
 from .config import ConfigError, Settings, ensure_workspace, project_dirs, project_root_for, resolve_profile
 from .exports import atomic_json
 from .handoff import stage_for_slicer
 
-
-BAMBU_X2D_PROFILE_ID = "bambu-x2d"
-BAMBU_X2D_PLATE_CENTER_MM = (138.25, 128.0, 0.0)
-BAMBU_X2D_COMMON_DUAL_VOLUME_MM = (235.5, 256.0, 256.0)
-BAMBU_X2D_MAIN_VOLUME_MM = (256.0, 256.0, 260.0)
-BAMBU_X2D_SAFE_RECTANGLE_MM = {"x_min": 20.5, "x_max": 256.0, "y_min": 0.0, "y_max": 256.0, "z_max": 256.0}
-BAMBU_X2D_AUXILIARY_LIMITS = {"max_print_speed_mm_s": 200, "max_acceleration_mm_s2": 1000}
+_X2D = load_adapters()["bambu-x2d"]
+BAMBU_X2D_PROFILE_ID = _X2D.profile_id
+BAMBU_X2D_PLATE_CENTER_MM = _X2D.plate_center_mm
+BAMBU_X2D_COMMON_DUAL_VOLUME_MM = _X2D.build_volume_mm
+BAMBU_X2D_MAIN_VOLUME_MM = tuple(float(value) for value in _X2D.extras["main_only_build_volume_mm"])
+BAMBU_X2D_SAFE_RECTANGLE_MM = {key: float(value) for key, value in _X2D.extras["safe_rectangle_mm"].items()}
+BAMBU_X2D_AUXILIARY_LIMITS = {key: int(value) for key, value in _X2D.extras["auxiliary_limits"].items()}
 
 
 class BambuError(ValueError):
-    """An X2D-specific handoff error."""
+    """A Bambu-specific handoff error."""
 
 
 def _slots(raw: Any, labels: set[str]) -> dict[str, int]:
@@ -43,7 +44,9 @@ def _slots(raw: Any, labels: set[str]) -> dict[str, int]:
     return normalized
 
 
-def _nozzle_for_tool(value: Any) -> str:
+def _nozzle_for_tool(value: Any, tool_model: str) -> str:
+    if tool_model == "single":
+        return "main"
     if value == 0:
         return "main"
     if value == 1:
@@ -51,23 +54,80 @@ def _nozzle_for_tool(value: Any) -> str:
     return "unspecified"
 
 
-def _plate_name(raw: Any) -> str:
+def _plate_name(raw: Any, fallback: str) -> str:
     if raw is None:
-        return "vibeCAD X2D plate"
+        return fallback
     value = str(raw).strip()
     if not value:
         raise BambuError("plate_name must be non-empty when provided")
     return value
 
 
+def _capacity(adapter: BambuAdapter, raw: Any) -> int | None:
+    if adapter.default_slot_capacity is None or adapter.max_slot_capacity is None:
+        return None
+    if raw is None:
+        return adapter.default_slot_capacity
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise BambuError("ams_slot_capacity must be an integer")
+    if raw < 1 or raw > adapter.max_slot_capacity:
+        raise BambuError(f"ams_slot_capacity must be 1..{adapter.max_slot_capacity} for {adapter.profile_id}")
+    return raw
+
+
+def _reject_single_nozzle_tools(adapter: BambuAdapter, solids_map: Any) -> None:
+    if adapter.tool_model != "single" or not isinstance(solids_map, Mapping):
+        return
+    for label, details in solids_map.items():
+        if isinstance(details, Mapping) and details.get("tool") not in (None, 0):
+            raise BambuError(f"P2S has one nozzle; tool must be 0 or omitted ({label!r})")
+
+
+def _manual_steps(adapter: BambuAdapter) -> list[str]:
+    if adapter.tool_model == "dual_shared_xy":
+        return [
+            "For Bambu Studio UI import, select all listed individual STL files together and retain them as one multi-part object or assembly when prompted.",
+            "Bind every Bambu slot in this manifest to the actual loaded printer material source; slot numbers are saved metadata, not live AMS bindings.",
+            "Use the Bambu Lab X2D 0.4 mm process selected for the final slice, then inspect the complete Preview before printing.",
+            "If any part uses the auxiliary hotend, keep its process at or below 200 mm/s print speed and 1000 mm/s² acceleration, and verify material/quality compatibility.",
+            "The generated bambu-assemble-list.json is a CLI assembly recipe only. Use it with full, version-pinned Bambu machine/process/filament configuration and accept a native project only after Bambu Studio --info succeeds.",
+        ]
+    return [
+        "For Bambu Studio UI import, select all listed individual STL files together and retain them as one multi-part object or assembly when prompted.",
+        "Bind every Bambu slot in this manifest to the actual loaded AMS or external spool. Slot numbers are saved metadata, not live AMS bindings.",
+        f"Select the Bambu Lab P2S 0.4 mm process ({adapter.studio_process_hint} unless a different installed 0.4 mm P2S process is intended), then inspect the complete Preview before printing.",
+        "P2S Combo default is one AMS 2 Pro: slots 1 through 4. Raise ams_slot_capacity only when more AMS units are actually connected, never above 20.",
+        "TPU 85A and TPU 90A on P2S are external-spool materials. An AMS slot number does not mean the AMS can feed them.",
+        "The generated bambu-assemble-list.json is a CLI assembly recipe only. A native project is acceptable only after that Studio build's --info succeeds. This plugin does not export one.",
+    ]
+
+
+def _limitations() -> list[str]:
+    return [
+        "slicer-handoff.3mf remains a vendor-neutral interchange file; it is not asserted to be a Bambu-native project.",
+        "This adapter deliberately does not auto-export a native Bambu 3MF: direct CLI assembly without full current Bambu configuration was observed to produce an archive that can fail Bambu Studio --info.",
+        "No print is dispatched and no live AMS, material, nozzle, firmware, or process state is inferred.",
+    ]
+
+
+def _x2d_contract(adapter: BambuAdapter) -> dict[str, Any]:
+    return {
+        "shared_xy_toolhead": "main left direct-drive hotend plus right remote-fed auxiliary hotend; the heads do not move independently",
+        "main_only_build_volume_mm": list(BAMBU_X2D_MAIN_VOLUME_MM),
+        "common_dual_or_auxiliary_build_volume_mm": list(adapter.build_volume_mm),
+        "common_dual_safe_rectangle_mm": dict(BAMBU_X2D_SAFE_RECTANGLE_MM),
+        "plate_center_mm": list(adapter.plate_center_mm),
+        "auxiliary_hotend_limits": dict(BAMBU_X2D_AUXILIARY_LIMITS),
+    }
+
+
 def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, Any]:
-    """Create an X2D-safe UI/CLI assembly recipe without claiming a native project."""
+    """Create a Bambu-safe UI/CLI assembly recipe without claiming a native project."""
     try:
         profile = resolve_profile(settings, args)
-        if profile.id != BAMBU_X2D_PROFILE_ID:
-            raise BambuError(
-                f"vibecad_stage_for_bambu requires printer_profile {BAMBU_X2D_PROFILE_ID!r}, got {profile.id!r}"
-            )
+        adapter = require_adapter(profile.id)
+        _reject_single_nozzle_tools(adapter, args.get("solids_map"))
+        capacity = _capacity(adapter, args.get("ams_slot_capacity"))
         generic = stage_for_slicer(settings, args)
         if not generic.get("success"):
             return generic
@@ -75,6 +135,10 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
         parts = list(generic["parts"])
         labels = {str(part["label"]) for part in parts}
         slots = _slots(args.get("bambu_slots"), labels)
+        if capacity is not None:
+            for label, slot in slots.items():
+                if slot > capacity:
+                    raise BambuError(f"bambu slot for {label!r} is {slot}, above slot capacity {capacity}")
         stls_by_label = {str(entry["label"]): entry for entry in generic["individual_stls"]}
         if set(stls_by_label) != labels:
             raise BambuError("generic staging did not produce one named STL fallback for every Bambu part")
@@ -85,7 +149,9 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
         exports_dir, _renders_dir = project_dirs(project)
         assemble_list = exports_dir / "bambu-assemble-list.json"
         handoff_manifest = exports_dir / "bambu-handoff.json"
-        plate_name = _plate_name(args.get("plate_name"))
+        fallback_plate = "vibeCAD X2D plate" if adapter.tool_model == "dual_shared_xy" else "vibeCAD P2S plate"
+        plate_name = _plate_name(args.get("plate_name"), fallback_plate)
+        center = adapter.plate_center_mm
 
         objects = []
         bambu_parts = []
@@ -93,7 +159,7 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             label = str(part["label"])
             stl = stls_by_label[label]
             slot = slots[label]
-            nozzle = _nozzle_for_tool(part.get("tool"))
+            nozzle = _nozzle_for_tool(part.get("tool"), adapter.tool_model)
             objects.append(
                 {
                     "path": str(stl["path"]),
@@ -101,9 +167,9 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
                     "filaments": [slot],
                     "subtype": "normal_part",
                     "assemble_index": [1],
-                    "pos_x": [BAMBU_X2D_PLATE_CENTER_MM[0]],
-                    "pos_y": [BAMBU_X2D_PLATE_CENTER_MM[1]],
-                    "pos_z": [BAMBU_X2D_PLATE_CENTER_MM[2]],
+                    "pos_x": [center[0]],
+                    "pos_y": [center[1]],
+                    "pos_z": [center[2]],
                 }
             )
             bambu_parts.append(
@@ -119,23 +185,18 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
                 }
             )
 
-        assemble_payload = {
-            "plates": [{"plate_name": plate_name, "need_arrange": False, "objects": objects}]
+        atomic_json(assemble_list, {"plates": [{"plate_name": plate_name, "need_arrange": False, "objects": objects}]})
+        manual_steps = _manual_steps(adapter)
+        limitations = _limitations()
+        bambu_contract = {
+            "machine_name": adapter.machine_name,
+            "plate_center_mm": list(center),
+            "build_volume_mm": list(adapter.build_volume_mm),
+            "tool_model": adapter.tool_model,
+            "studio_process_hint": adapter.studio_process_hint,
+            "slot_capacity": capacity,
         }
-        atomic_json(assemble_list, assemble_payload)
-        manual_steps = [
-            "For Bambu Studio UI import, select all listed individual STL files together and retain them as one multi-part object or assembly when prompted.",
-            "Bind every Bambu slot in this manifest to the actual loaded printer material source; slot numbers are saved metadata, not live AMS bindings.",
-            "Use the Bambu Lab X2D 0.4 mm process selected for the final slice, then inspect the complete Preview before printing.",
-            "If any part uses the auxiliary hotend, keep its process at or below 200 mm/s print speed and 1000 mm/s² acceleration, and verify material/quality compatibility.",
-            "The generated bambu-assemble-list.json is a CLI assembly recipe only. Use it with full, version-pinned Bambu machine/process/filament configuration and accept a native project only after Bambu Studio --info succeeds.",
-        ]
-        limitations = [
-            "slicer-handoff.3mf remains a vendor-neutral interchange file; it is not asserted to be a Bambu-native project.",
-            "This adapter deliberately does not auto-export a native Bambu 3MF: direct CLI assembly without full current Bambu configuration was observed to produce an archive that can fail Bambu Studio --info.",
-            "No print is dispatched and no live AMS, material, nozzle, firmware, or process state is inferred.",
-        ]
-        manifest = {
+        manifest: dict[str, Any] = {
             "schema_version": 2,
             "printer_profile": profile.id,
             "source_step": str(step_file),
@@ -143,20 +204,24 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             "bambu_assemble_list": str(assemble_list),
             "bambu_slots": slots,
             "parts": bambu_parts,
-            "x2d_contract": {
-                "shared_xy_toolhead": "main left direct-drive hotend plus right remote-fed auxiliary hotend; the heads do not move independently",
-                "main_only_build_volume_mm": BAMBU_X2D_MAIN_VOLUME_MM,
-                "common_dual_or_auxiliary_build_volume_mm": BAMBU_X2D_COMMON_DUAL_VOLUME_MM,
-                "common_dual_safe_rectangle_mm": BAMBU_X2D_SAFE_RECTANGLE_MM,
-                "plate_center_mm": BAMBU_X2D_PLATE_CENTER_MM,
-                "auxiliary_hotend_limits": BAMBU_X2D_AUXILIARY_LIMITS,
-            },
+            "bambu_contract": bambu_contract,
             "manual_bambu_steps": manual_steps,
             "limitations": limitations,
             "status": "ready_for_manual_bambu_import",
         }
+        if adapter.tool_model == "dual_shared_xy":
+            manifest["x2d_contract"] = _x2d_contract(adapter)
+        else:
+            manifest["p2s_contract"] = {
+                "machine_name": adapter.machine_name,
+                "slot_capacity": capacity,
+                "max_slot_capacity": adapter.max_slot_capacity,
+                "supported_nozzle_diameters_mm": list(adapter.extras.get("supported_nozzle_diameters_mm") or []),
+                "max_nozzle_temperature_c": adapter.extras.get("max_nozzle_temperature_c"),
+                "max_bed_temperature_c": adapter.extras.get("max_bed_temperature_c"),
+            }
         atomic_json(handoff_manifest, manifest)
-        return {
+        result = {
             "success": True,
             **generic,
             "status": manifest["status"],
@@ -164,9 +229,14 @@ def stage_for_bambu(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
             "bambu_handoff_manifest": str(handoff_manifest),
             "bambu_slots": slots,
             "bambu_parts": bambu_parts,
-            "x2d_contract": manifest["x2d_contract"],
+            "bambu_contract": bambu_contract,
             "manual_bambu_steps": manual_steps,
             "limitations": limitations,
         }
-    except (ConfigError, BambuError) as exc:
+        if "x2d_contract" in manifest:
+            result["x2d_contract"] = manifest["x2d_contract"]
+        if "p2s_contract" in manifest:
+            result["p2s_contract"] = manifest["p2s_contract"]
+        return result
+    except (ConfigError, BambuError, AdapterError) as exc:
         return {"success": False, "error": str(exc), "printer_validation": "failed"}

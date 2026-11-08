@@ -42,3 +42,5 @@ hermes config set 'plugins.entries.hermes-r0b0t-vibeCAD.settings.printer_profile
 ```
 
 v1 supports rectangular FDM beds only. The plugin checks `model width + 2 × margin`, `model depth + 2 × margin`, `model height`, and the Z=0 datum. It intentionally fails if no profile is selected.
+
+Bundled ids are `generic-fdm-220`, `bambu-x2d`, and `bambu-p2s`. AMS slot capacity is not part of this geometric schema. Bambu slot rules live in the handoff adapter, not in the bed profile.

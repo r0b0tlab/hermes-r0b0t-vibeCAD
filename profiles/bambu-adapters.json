@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "adapters": [
+    {
+      "profile_id": "bambu-x2d",
+      "machine_name": "Bambu Lab X2D 0.4 nozzle",
+      "plate_center_mm": [138.25, 128.0, 0.0],
+      "build_volume_mm": [235.5, 256.0, 256.0],
+      "tool_model": "dual_shared_xy",
+      "default_slot_capacity": null,
+      "max_slot_capacity": null,
+      "studio_process_hint": "Bambu Lab X2D 0.4 mm process",
+      "main_only_build_volume_mm": [256.0, 256.0, 260.0],
+      "safe_rectangle_mm": {"x_min": 20.5, "x_max": 256.0, "y_min": 0.0, "y_max": 256.0, "z_max": 256.0},
+      "auxiliary_limits": {"max_print_speed_mm_s": 200, "max_acceleration_mm_s2": 1000}
+    },
+    {
+      "profile_id": "bambu-p2s",
+      "machine_name": "Bambu Lab P2S 0.4 nozzle",
+      "plate_center_mm": [128.0, 128.0, 0.0],
+      "build_volume_mm": [256.0, 256.0, 256.0],
+      "tool_model": "single",
+      "default_slot_capacity": 4,
+      "max_slot_capacity": 20,
+      "studio_process_hint": "0.20mm Standard @BBL P2S",
+      "supported_nozzle_diameters_mm": [0.2, 0.4, 0.6, 0.8],
+      "max_nozzle_temperature_c": 300,
+      "max_bed_temperature_c": 110
+    }
+  ]
+}

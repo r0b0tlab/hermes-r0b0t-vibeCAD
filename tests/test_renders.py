@@ -31,3 +31,4 @@ def test_generates_requested_deterministic_png_views(tmp_path: Path) -> None:
     for image in rendered["renders"].values():
         path = Path(image)
         assert path.is_file() and path.stat().st_size > 100
+    assert rendered["media"] == [f"MEDIA:{path}" for path in rendered["renders"].values()]

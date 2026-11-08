@@ -16,7 +16,7 @@ from vibecad_public_plugin.runtime import execute_and_export
 FIXTURE = Path(__file__).parent / "fixtures" / "model.py"
 
 
-def _exported_step(tmp_path: Path) -> tuple[Settings, str]:
+def _exported_step(tmp_path: Path, printer_profile: str = "bambu-x2d") -> tuple[Settings, str]:
     workspace = tmp_path / "projects"
     source = workspace / "demo" / "source"
     source.mkdir(parents=True)
@@ -26,7 +26,7 @@ def _exported_step(tmp_path: Path) -> tuple[Settings, str]:
     settings = Settings(
         workspace_root=workspace,
         python_executable=Path(sys.executable),
-        printer_profile="bambu-x2d",
+        printer_profile=printer_profile,
         printer_profiles_file=None,
         timeout_s=120,
     )
@@ -75,3 +75,96 @@ def test_stage_for_bambu_requires_a_slot_for_every_part(tmp_path: Path) -> None:
     result = stage_for_bambu(settings, {"step_file": step_file, "bambu_slots": {"body_01": 3}, "solids_map": _solids_map()})
     assert result["success"] is False
     assert "accent_01" in result["error"]
+
+
+def test_stage_for_p2s_centers_on_128_and_rejects_second_nozzle(tmp_path: Path) -> None:
+    settings, step_file = _exported_step(tmp_path, printer_profile="bambu-p2s")
+    solids = {
+        "body_01": {"solid_index": 1, "material": "PLA", "color": "#00AA00", "tool": 0},
+        "accent_01": {"solid_index": 2, "material": "PLA", "color": "#FFFFFF", "tool": 0},
+    }
+    staged = stage_for_bambu(
+        settings,
+        {
+            "step_file": step_file,
+            "plate_name": "P2S combo",
+            "bambu_slots": {"body_01": 1, "accent_01": 2},
+            "solids_map": solids,
+        },
+    )
+    assert staged["success"] is True, staged
+    assemble = json.loads(Path(staged["bambu_assemble_list"]).read_text(encoding="utf-8"))
+    assert {tuple(entry["pos_x"] + entry["pos_y"] + entry["pos_z"]) for entry in assemble["plates"][0]["objects"]} == {(128.0, 128.0, 0.0)}
+    manifest = json.loads(Path(staged["bambu_handoff_manifest"]).read_text(encoding="utf-8"))
+    assert manifest["bambu_contract"]["machine_name"] == "Bambu Lab P2S 0.4 nozzle"
+    assert manifest["bambu_contract"]["slot_capacity"] == 4
+    assert "x2d_contract" not in manifest
+    assert "auxiliary hotend" not in " ".join(manifest["manual_bambu_steps"]).lower()
+    assert any("not auto-export" in item for item in manifest["limitations"])
+
+    denied = stage_for_bambu(
+        settings,
+        {
+            "step_file": step_file,
+            "bambu_slots": {"body_01": 1, "accent_01": 2},
+            "solids_map": {
+                "body_01": {"solid_index": 1, "tool": 0},
+                "accent_01": {"solid_index": 2, "tool": 1},
+            },
+        },
+    )
+    assert denied["success"] is False
+    assert "one nozzle" in denied["error"]
+
+
+def test_p2s_slot_5_needs_an_explicit_capacity_and_21_is_rejected(tmp_path: Path) -> None:
+    settings, step_file = _exported_step(tmp_path, printer_profile="bambu-p2s")
+    solids = {
+        "body_01": {"solid_index": 1, "tool": 0},
+        "accent_01": {"solid_index": 2, "tool": 0},
+    }
+    over = stage_for_bambu(
+        settings,
+        {"step_file": step_file, "bambu_slots": {"body_01": 1, "accent_01": 5}, "solids_map": solids},
+    )
+    assert over["success"] is False
+    assert "4" in over["error"]
+
+    raised = stage_for_bambu(
+        settings,
+        {
+            "step_file": step_file,
+            "ams_slot_capacity": 8,
+            "bambu_slots": {"body_01": 1, "accent_01": 5},
+            "solids_map": solids,
+        },
+    )
+    assert raised["success"] is True, raised
+    assert json.loads(Path(raised["bambu_handoff_manifest"]).read_text(encoding="utf-8"))["bambu_contract"]["slot_capacity"] == 8
+
+    absurd = stage_for_bambu(
+        settings,
+        {
+            "step_file": step_file,
+            "ams_slot_capacity": 21,
+            "bambu_slots": {"body_01": 1, "accent_01": 2},
+            "solids_map": solids,
+        },
+    )
+    assert absurd["success"] is False
+    assert "20" in absurd["error"]
+
+
+def test_generic_profile_is_not_a_bambu_adapter(tmp_path: Path) -> None:
+    settings, step_file = _exported_step(tmp_path, printer_profile="generic-fdm-220")
+    result = stage_for_bambu(
+        settings,
+        {
+            "step_file": step_file,
+            "bambu_slots": {"body_01": 1, "accent_01": 2},
+            "solids_map": _solids_map(),
+        },
+    )
+    assert result["success"] is False
+    assert "bambu-p2s" in result["error"]
+    assert "bambu-x2d" in result["error"]

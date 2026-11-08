@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 
@@ -30,3 +31,8 @@ def register(ctx: Any) -> None:
                 return _payload({"success": False, "error": f"vibeCAD internal error: {type(exc).__name__}: {exc}"})
 
         ctx.register_tool(name=name, toolset="vibecad", schema=schema, handler=handler, emoji=emoji)
+
+    skill_md = Path(__file__).resolve().parent / "skills" / "fdm-handoff" / "SKILL.md"
+    register_skill = getattr(ctx, "register_skill", None)
+    if register_skill is not None and skill_md.is_file():
+        register_skill("fdm-handoff", skill_md)
