@@ -31,7 +31,7 @@ def _literal(node: ast.AST) -> float | int:
     return value
 
 
-def _offset(lines: list[str], lineno: int, column: int) -> int:
+def _offset(lines: list[bytes], lineno: int, column: int) -> int:
     return sum(len(item) for item in lines[: lineno - 1]) + column
 
 
@@ -47,7 +47,8 @@ def modify_parameter(settings: Settings, args: Mapping[str, Any]) -> dict[str, A
         new_value = float(raw_value)
         if not math.isfinite(new_value):
             raise ConfigError("new_val must be a finite number")
-        source = script.read_text(encoding="utf-8")
+        source_bytes = script.read_bytes()
+        source = source_bytes.decode("utf-8")
         tree = ast.parse(source, filename=str(script))
         params = _params_assignment(tree)
         target: ast.AST | None = None
@@ -58,13 +59,13 @@ def modify_parameter(settings: Settings, args: Mapping[str, Any]) -> dict[str, A
         if target is None:
             raise ConfigError(f"PARAMS has no key {name!r}")
         old_value = _literal(target)
-        lines = source.splitlines(keepends=True)
+        lines = source_bytes.splitlines(keepends=True)
         start = _offset(lines, target.lineno, target.col_offset)
         end = _offset(lines, target.end_lineno, target.end_col_offset)
-        updated = source[:start] + repr(new_value) + source[end:]
+        updated = (source_bytes[:start] + repr(new_value).encode("utf-8") + source_bytes[end:]).decode("utf-8")
         ast.parse(updated, filename=str(script))
         temporary = script.with_name(f".{script.name}.{os.getpid()}.tmp")
-        temporary.write_text(updated, encoding="utf-8")
+        temporary.write_bytes(updated.encode("utf-8"))
         os.replace(temporary, script)
         return {"success": True, "script_path": str(script), "param_name": name, "old_value": old_value, "new_value": new_value, "changed_bytes": [start, end], "next_step": "Run vibecad_execute_and_export before relying on this edit."}
     except (ConfigError, SyntaxError, TypeError, ValueError) as exc:

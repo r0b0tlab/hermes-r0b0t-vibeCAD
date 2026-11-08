@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from vibecad_public_plugin.config import settings_from_context
+import pytest
+
+from vibecad_public_plugin.config import ConfigError, project_dirs, settings_from_context
 
 
 class FakeContext:
@@ -33,3 +35,21 @@ def test_settings_preserves_configured_venv_python_symlink(tmp_path: Path) -> No
 
     assert settings.python_executable == shim
     assert settings.python_executable.is_symlink()
+
+
+@pytest.mark.parametrize("directory", ["exports", "renders", "build"])
+@pytest.mark.parametrize("existing", [True, False])
+def test_project_dirs_rejects_symlinks_leaving_project(tmp_path: Path, directory: str, existing: bool) -> None:
+    project = tmp_path / "workspace" / "demo"
+    project.mkdir(parents=True)
+    if directory != "build":
+        (project / "source").mkdir()
+    outside = tmp_path / "outside"
+    if existing:
+        outside.mkdir()
+    (project / directory).symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ConfigError):
+        project_dirs(project)
+    assert not (outside / "renders").exists()
+    if not existing:
+        assert not outside.exists()

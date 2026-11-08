@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from vibecad_public_plugin.geometry import fit_to_profile
+import pytest
+
+from vibecad_public_plugin.geometry import GeometryError, fit_to_profile
 from vibecad_public_plugin.profiles import BedProfile, PrinterProfile
 
 
@@ -64,3 +66,23 @@ def test_fit_to_profile_reports_each_failed_axis_and_bad_datum() -> None:
     assert result["fits"] is False
     assert result["z_datum_ok"] is False
     assert set(result["failures"]) == {"x", "y", "z", "z_datum"}
+
+
+@pytest.mark.parametrize("axis", ["x", "y", "z"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), -0.1])
+def test_invalid_bbox_dimensions_are_rejected(axis: str, value: float) -> None:
+    data = metrics()
+    data["bbox"]["size_mm"][axis] = value
+    with pytest.raises(GeometryError):
+        fit_to_profile(data, profile())
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_datum_is_rejected(value: float) -> None:
+    with pytest.raises(GeometryError):
+        fit_to_profile(metrics(z_min=value), profile())
+
+
+def test_fit_preserves_epsilon_and_allows_zero_size() -> None:
+    assert fit_to_profile(metrics(x=96.005, z=0, z_min=0.005), profile())["fits"]
+    assert not fit_to_profile(metrics(x=96.02), profile())["fits"]

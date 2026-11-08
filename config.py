@@ -128,6 +128,13 @@ def project_dirs(project_root: Path) -> tuple[Path, Path]:
     established = (project_root / "source").exists() or (project_root / "exports").exists()
     exports = project_root / ("exports" if established else "build")
     renders = project_root / ("renders" if established else "build")
+    # Resolve both before creating either, to prevent output symlink escapes.
+    root = project_root.resolve()
+    for output_dir in (exports, renders):
+        try:
+            output_dir.resolve(strict=False).relative_to(root)
+        except ValueError as exc:
+            raise ConfigError(f"output directory must remain under the project: {root}") from exc
     exports.mkdir(parents=True, exist_ok=True)
     renders.mkdir(parents=True, exist_ok=True)
     return exports, renders

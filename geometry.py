@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Mapping
 
 from .profiles import PrinterProfile
@@ -20,6 +21,8 @@ def _number(mapping: Mapping[str, Any], key: str, context: str) -> float:
         value = float(mapping[key])
     except (KeyError, TypeError, ValueError) as exc:
         raise GeometryError(f"missing or invalid {context}.{key}") from exc
+    if not math.isfinite(value):
+        raise GeometryError(f"missing or invalid {context}.{key}")
     return value
 
 
@@ -36,6 +39,8 @@ def fit_to_profile(metrics: Mapping[str, Any], profile: PrinterProfile) -> dict[
     y = _number(size, "y", "bbox.size_mm")
     z = _number(size, "z", "bbox.size_mm")
     z_min = _number(minimum, "z", "bbox.min_mm")
+    if any(value < 0 for value in (x, y, z)):
+        raise GeometryError("bbox.size_mm dimensions must be non-negative")
     margin = profile.bed.safe_margin_mm
     failures: list[str] = []
     if x + 2 * margin > profile.bed.width_mm + EPSILON_MM:
@@ -114,7 +119,7 @@ for left_index, left in enumerate(solids):
         pairs.append({
             "left_solid": left_index + 1,
             "right_solid": right_index + 1,
-            "overlap_volume_mm3": float(overlap.volume) if overlap else 0.0,
+            "overlap_volume_mm3": sum(float(part.volume) for part in overlap) if isinstance(overlap, list) else float(overlap.volume) if overlap else 0.0,
         })
 
 print(json.dumps({

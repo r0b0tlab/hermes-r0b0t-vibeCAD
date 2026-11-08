@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from vibecad_public_plugin.config import Settings
 from vibecad_public_plugin.runtime import execute_and_export, inspect_metrics
 
@@ -51,3 +53,35 @@ def test_execute_export_inspect_and_preserve_last_good_artifacts(tmp_path: Path)
     failed = execute_and_export(settings, {"script_path": str(model), "output_name": "demo"})
     assert failed["success"] is False
     assert step.read_bytes() == baseline
+
+
+def test_inspection_sums_disconnected_overlap_regions(tmp_path: Path) -> None:
+    from build123d import Box, Compound, Pos, export_step
+
+    # A single U-shaped solid intersecting a bar at two disconnected regions.
+    left = Pos(-3, 0, 0) * Box(2, 2, 2)
+    right = Pos(3, 0, 0) * Box(2, 2, 2)
+    bridge = Pos(0, 2, 0) * Box(8, 2, 2)
+    u_shape = left.fuse(right, bridge)
+    bar = Box(10, 1, 1)
+    step = tmp_path / "overlap.step"
+    export_step(Compound(children=[u_shape, bar]), step)
+    inspected = inspect_metrics(make_settings(tmp_path), {"step_file": str(step)})
+    assert inspected["success"] is True, inspected
+    assert inspected["metrics"]["n_solids"] == 2
+    assert inspected["metrics"]["intersections"][0]["overlap_volume_mm3"] == pytest.approx(4.0)
+
+
+def test_export_rejects_output_directory_symlink_before_running_model(tmp_path: Path) -> None:
+    workspace = tmp_path / "projects"
+    source = workspace / "demo" / "source"
+    source.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (source.parent / "exports").symlink_to(outside, target_is_directory=True)
+    model = source / "model.py"
+    model.write_text("raise RuntimeError('model must not run')\n", encoding="utf-8")
+    result = execute_and_export(make_settings(workspace), {"script_path": str(model), "output_name": "demo"})
+    assert result["success"] is False
+    assert "output directory" in result["error"]
+    assert list(outside.iterdir()) == []
