@@ -17,7 +17,11 @@ The plugin does not connect to a printer.
 
 ## Desktop
 
-After install, enable the Desktop column in Capabilities → Plugins (not Settings → Plugins), then reload desktop plugins. Preview PNGs are depth-tested. Emit each `media` line and Desktop labels the view inline. The vibeCAD pane repeats the latest sheet for this app session.
+After install, enable the Desktop column in Capabilities → Plugins (not Settings → Plugins), then reload desktop plugins. Preview PNGs are depth-tested. Emit each `media` line and Desktop labels the view inline. The vibeCAD pane follows the focused chat and shows views from its latest **observed** sheet, ordered by the gateway's session history. Open the transcript to mount its media cards; the pane is not a background history browser. It stays empty if it cannot verify order or identify a unique tool call; inline media still falls back to Desktop's built-in player. History is requested via the active gateway, so other connections may not be available.
+
+Desktop attributes each media path to the first tool result that named it. Distinct immutable output paths per render revision are required for correct provenance and historical images; overwriting a preview path cannot preserve earlier revisions.
+
+The JavaScript integration harness uses Node's standard library: `node --experimental-vm-modules --test tests/desktop.test.mjs`.
 
 ## Try the two-part demo
 
