@@ -147,14 +147,13 @@ export_stl(shape, stl_path, tolerance=0.02, angular_tolerance=0.1)
 mesher = Mesher()
 mesher.add_shape(shape, linear_deflection=0.02, angular_deflection=0.1)
 mesher.write(three_mf_path)
-triangles = sum(mesher.triangle_counts)
 print(json.dumps({
     "stl_bytes": os.path.getsize(stl_path),
     "three_mf_bytes": os.path.getsize(three_mf_path),
     "mesh_count": mesher.mesh_count,
     "triangle_counts": mesher.triangle_counts,
-    "roundtrip_skipped": triangles > 100000,
-    "roundtrip_skip_reason": "dense_mesh" if triangles > 100000 else None,
+    "roundtrip_skipped": True,
+    "roundtrip_skip_reason": "not_performed",
 }, sort_keys=True))
 '''
 

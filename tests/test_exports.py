@@ -35,6 +35,9 @@ def test_execute_export_inspect_and_preserve_last_good_artifacts(tmp_path: Path)
     assert first["success"] is True, json.dumps(first, indent=2, default=str)
     assert first["printer_validation"] == "passed"
     assert first["metrics"]["n_solids"] == 2
+    # A nonempty archive is not an independently reimported/verified mesh.
+    assert first["mesh_export"]["roundtrip_skipped"] is True
+    assert first["mesh_export"]["roundtrip_skip_reason"] == "not_performed"
     for path in first["output"].values():
         assert Path(path).is_file() and Path(path).stat().st_size > 0
 
