@@ -22,7 +22,7 @@ import math
 import os
 from pathlib import Path
 from build123d import export_stl, import_step
-from PIL import Image, ImageDraw
+from PIL import Image
 import numpy as np
 import trimesh
 
@@ -57,7 +57,25 @@ def color(value):
     if len(text) != 6:
         raise ValueError("part_colors entries must be #RRGGBB")
     return tuple(int(text[i:i+2], 16) for i in (0, 2, 4))
-palette = [color(v) for v in requested] if requested else [(0, 132, 88), (235, 155, 60), (110, 150, 200), (180, 130, 190)]
+palette = [color(v) for v in requested] if requested else [(0, 122, 61), (236, 236, 232)]
+
+def solid_rgb(solid, index):
+    if requested:
+        return palette[index % len(palette)]
+    paint = getattr(solid, "color", None)
+    if paint is not None:
+        try:
+            channels = tuple(paint)[:3]
+            if len(channels) == 3:
+                scale = 255.0 if max(channels) <= 1.0 else 1.0
+                return tuple(max(0, min(255, int(round(channel * scale)))) for channel in channels)
+        except Exception:
+            pass
+    return palette[index % len(palette)]
+
+part_rgb = [solid_rgb(solid, index) for index, solid in enumerate(solids)]
+light = np.array([0.25, -0.35, 0.90], dtype=float)
+light /= np.linalg.norm(light)
 
 def projection(name):
     x, y, z = vertices[:, 0], vertices[:, 1], vertices[:, 2]
@@ -80,19 +98,48 @@ def render(name, output):
     screen = np.empty_like(projected)
     screen[:, 0] = pad + (projected[:, 0] - low[0]) * scale
     screen[:, 1] = side - pad - (projected[:, 1] - low[1]) * scale
-    image = Image.new("RGB", (side, side), (247, 249, 251))
-    draw = ImageDraw.Draw(image)
-    order = np.argsort(depth[faces].mean(axis=1))
-    depth_low = float(depth.min())
-    depth_span = max(float(depth.max()) - depth_low, 1e-9)
-    for face_index in order:
-        points = [(float(screen[v, 0]), float(screen[v, 1])) for v in faces[face_index]]
-        base = palette[int(part_faces[face_index]) % len(palette)]
-        local_depth = float(depth[faces[face_index]].mean())
-        shade = 0.45 + 0.55 * max(0.0, min(1.0, (local_depth - depth_low) / depth_span))
-        draw.polygon(points, fill=tuple(round(channel * shade) for channel in base))
+    zbuf = np.full((side, side), -1e18)
+    pixels = np.zeros((side, side, 3), dtype=np.uint8)
+    pixels[:, :] = (247, 249, 251)
+    for face_index, tri in enumerate(faces):
+        pts = screen[tri]
+        zs = depth[tri]
+        minx = max(int(np.floor(pts[:, 0].min())), 0)
+        maxx = min(int(np.ceil(pts[:, 0].max())), side - 1)
+        miny = max(int(np.floor(pts[:, 1].min())), 0)
+        maxy = min(int(np.ceil(pts[:, 1].max())), side - 1)
+        if minx > maxx or miny > maxy:
+            continue
+        x0, y0 = pts[0]
+        x1, y1 = pts[1]
+        x2, y2 = pts[2]
+        den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if abs(den) < 1e-8:
+            continue
+        xs = np.arange(minx, maxx + 1) + 0.5
+        ys = np.arange(miny, maxy + 1) + 0.5
+        grid_x, grid_y = np.meshgrid(xs, ys)
+        w0 = ((y1 - y2) * (grid_x - x2) + (x2 - x1) * (grid_y - y2)) / den
+        w1 = ((y2 - y0) * (grid_x - x2) + (x0 - x2) * (grid_y - y2)) / den
+        w2 = 1.0 - w0 - w1
+        zz = w0 * zs[0] + w1 * zs[1] + w2 * zs[2]
+        window = zbuf[miny:maxy + 1, minx:maxx + 1]
+        mask = (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4) & (zz > window)
+        if not np.any(mask):
+            continue
+        window[mask] = zz[mask]
+        zbuf[miny:maxy + 1, minx:maxx + 1] = window
+        edge_a = vertices[tri[1]] - vertices[tri[0]]
+        edge_b = vertices[tri[2]] - vertices[tri[0]]
+        normal = np.cross(edge_a, edge_b)
+        norm = float(np.linalg.norm(normal))
+        shade = 0.72
+        if norm > 1e-9:
+            shade = 0.42 + 0.58 * abs(float(np.dot(normal / norm, light)))
+        base = part_rgb[int(part_faces[face_index])]
+        pixels[miny:maxy + 1, minx:maxx + 1][mask] = tuple(max(0, min(255, int(round(channel * shade)))) for channel in base)
     output.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output)
+    Image.fromarray(pixels, mode="RGB").save(output)
 
 for name, output in outputs.items():
     render(name, output)

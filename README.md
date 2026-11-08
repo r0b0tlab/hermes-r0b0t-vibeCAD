@@ -17,7 +17,7 @@ The plugin does not connect to a printer.
 
 ## Desktop
 
-After install, enable the Desktop column in Capabilities → Plugins (not Settings → Plugins), then reload desktop plugins. A successful `vibecad_generate_preview_renders` plus each string in `media` emitted on its own line shows a labeled inline drawing. The vibeCAD pane repeats the latest sheet for this app session. CLI and chat still receive the files via `MEDIA:`.
+After install, enable the Desktop column in Capabilities → Plugins (not Settings → Plugins), then reload desktop plugins. Preview PNGs are depth-tested. Emit each `media` line and Desktop labels the view inline. The vibeCAD pane repeats the latest sheet for this app session.
 
 ## 90-second demo
 
