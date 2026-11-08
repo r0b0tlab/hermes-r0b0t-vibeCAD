@@ -2,6 +2,7 @@
 
 ## 0.4.0 — reliability and Desktop audit
 
+- Keep local build123d as the default workflow; Meshy remains a separate opt-in provider with its own API key and paid-call approvals. Do not silently switch when either path is unavailable.
 - Make pytest's console entry point collect consistently regardless of checkout directory name; cover both identifier and hyphenated layouts.
 - Add true high-resolution front/back detail viewports and source/image hashes for close visual review; do not treat images as anatomy or printability certification.
 - Accept a local single-shell STL from a generator such as the optional Meshy plugin, validate basic mesh topology and printer envelope in the CAD sidecar, and publish a uniquely hash-bound, uniformly scaled geometry revision. Preview STEP and STL with the same renderer; native slicing and Meshy API calls remain separate.

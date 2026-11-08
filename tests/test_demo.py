@@ -9,7 +9,9 @@ from vibecad_public_plugin.config import Settings
 from vibecad_public_plugin.runtime import execute_and_export, modify_parameter, stage_for_bambu
 
 
-def test_two_part_demo_export_edit_and_bambu_handoff(tmp_path: Path) -> None:
+def test_two_part_demo_export_edit_and_bambu_handoff(tmp_path: Path, monkeypatch) -> None:
+    # Local CAD must remain functional without optional Meshy credentials.
+    monkeypatch.delenv("MESHY_API_KEY", raising=False)
     example = Path(__file__).resolve().parents[1] / "examples" / "two_part_demo.py"
     project = tmp_path / "demo"
     source = project / "source"

@@ -55,6 +55,10 @@ Set the plugin's workspace to `~/vibecad-projects` as described in [the install 
 
 The example is tested against the real CAD runner and handoff. A handoff is geometry and reviewable metadata, **not** a sliced native Bambu project or a live AMS binding. In Studio, select the actual machine, process, colors and material sources; slice and inspect before printing. For a refusal demonstration, request slot 5 without increasing `ams_slot_capacity`—it must fail.
 
+## Generation: default local, optional Meshy
+
+The default local workflow uses trusted build123d scripts and works without Meshy, an API key or a cloud service. The user can also supply a local STL. The local CAD tools are not an image-to-3D generator; if a requested organic shape cannot be modeled faithfully, say so rather than silently changing providers or inventing a result. Meshy is an **optional separate Hermes plugin**, used only when the user explicitly chooses it, its key is configured and the user approves any paid operations. Having the Meshy plugin or key installed does not change vibeCAD's default. If Meshy is unavailable, fails or approval is declined, report that and preserve the local workflow.
+
 ## Meshy and other generated meshes
 
 Meshy runs as a separate, optional Hermes plugin and handles its own account, credit approvals and image-to-3D generation; vibeCAD does not bundle Meshy or call its API. Download a single-color **STL** into a project's `source/`, then call `vibecad_prepare_mesh` with `mesh_file`, `height_mm` and `printer_profile`. The CAD sidecar checks finite triangles, watertightness, winding, one connected shell, positive volume and profile envelope, and writes a hash-bound STL revision and manifest without modifying the source. Use `vibecad_generate_preview_renders` with `mesh_file` to inspect full front/back/iso views and magnified regions from that exact STL. Results do not prove anatomy, thin features, self-intersection absence, supports, adhesion or slicer settings; review them visually, slice and inspect in the actual slicer before printing. Meshes are not converted into editable STEP or sent through the multipart Bambu adapter.
