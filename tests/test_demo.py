@@ -5,13 +5,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 from vibecad_public_plugin.config import Settings
 from vibecad_public_plugin.runtime import execute_and_export, modify_parameter, stage_for_bambu
 
 
-def test_two_part_demo_export_edit_and_bambu_handoff(tmp_path: Path, monkeypatch) -> None:
-    # Local CAD must remain functional without optional Meshy credentials.
-    monkeypatch.delenv("MESHY_API_KEY", raising=False)
+@pytest.mark.parametrize("optional_meshy_key", [None, "dummy-not-a-real-key"])
+def test_two_part_demo_export_edit_and_bambu_handoff(tmp_path: Path, monkeypatch, optional_meshy_key) -> None:
+    # Installing optional Meshy credentials must not change the local CAD path.
+    if optional_meshy_key is None:
+        monkeypatch.delenv("MESHY_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("MESHY_API_KEY", optional_meshy_key)
     example = Path(__file__).resolve().parents[1] / "examples" / "two_part_demo.py"
     project = tmp_path / "demo"
     source = project / "source"
