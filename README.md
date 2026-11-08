@@ -19,14 +19,21 @@ The plugin does not connect to a printer.
 
 After install, enable the Desktop column in Capabilities → Plugins (not Settings → Plugins), then reload desktop plugins. Preview PNGs are depth-tested. Emit each `media` line and Desktop labels the view inline. The vibeCAD pane repeats the latest sheet for this app session.
 
-## 90-second demo
+## Try the two-part demo
 
-1. `vibecad_list_printer_profiles` — `bambu-p2s` is present.
-2. `vibecad_execute_and_export` on `examples/model.py` with `printer_profile: bambu-p2s`. Require `printer_validation: passed`.
-3. `vibecad_inspect_metrics` on the STEP.
-4. `vibecad_generate_preview_renders` for `iso`, `front`, and `top`. Emit every `media` line.
-5. `vibecad_stage_for_bambu` with slots 1 and 2 and `tool: 0`.
-6. Call it again with slot 5 and no `ams_slot_capacity`. `success` is false. That refusal is the plugin, not the narrator.
+Create a project in the configured workspace, then copy the bundled example into it. The plugin deliberately refuses model paths outside that workspace:
+
+```bash
+mkdir -p "$HOME/vibecad-projects"
+python scripts/new_project.py demo --workspace-root "$HOME/vibecad-projects"
+cp examples/two_part_demo.py "$HOME/vibecad-projects/demo/source/model.py"
+```
+
+Set the plugin's workspace to `~/vibecad-projects` as described in [the install guide](docs/INSTALL.md), and ask Hermes:
+
+> Use vibeCAD to export `demo/source/model.py` as `demo` for `bambu-p2s`. Show ISO, front and top previews. Stage a Bambu handoff with `body_01` on slot 1 and `accent_01` on slot 2; both use tool 0.
+
+The example is tested against the real CAD runner and handoff. A handoff is geometry and reviewable metadata, **not** a sliced native Bambu project or a live AMS binding. In Studio, select the actual machine, process, colors and material sources; slice and inspect before printing. For a refusal demonstration, request slot 5 without increasing `ams_slot_capacity`—it must fail.
 
 ## Not in scope
 
