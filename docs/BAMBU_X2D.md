@@ -1,6 +1,6 @@
 # Optional Bambu Studio X2D workflow
 
-`hermes-r0b0t-vibeCAD` remains usable with any rectangular FDM printer profile. The `bambu-x2d` profile and `vibecad_stage_for_bambu` are an optional, locally tested adapter for Bambu Studio X2D handoff.
+`hermes-r0b0t-vibeCAD` remains usable with any rectangular FDM printer profile. `vibecad_stage_for_bambu` dispatches on the selected profile id. `bambu-x2d` is the dual-tool adapter. `bambu-p2s` is the single-nozzle AMS Combo adapter documented in [BAMBU_P2S.md](BAMBU_P2S.md).
 
 ## What the adapter validates and creates
 

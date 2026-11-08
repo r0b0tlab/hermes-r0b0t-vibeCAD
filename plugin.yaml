@@ -1,10 +1,11 @@
 name: hermes-r0b0t-vibeCAD
-version: 0.1.2
-description: "Profile-driven build123d CAD, validation, rendering, and generic slicer handoff for FDM printers."
+version: 0.2.0
+description: "Profile-driven build123d CAD for FDM printers, with bed-fit refusals, preview drawings, and Bambu X2D / P2S AMS Combo handoffs. Executes trusted workspace models locally; does not dispatch prints or bind a live AMS."
 author: "r0b0t / Hermes Agent"
 license: MIT
 manifest_version: 2
 api_version: 1
+requires_hermes: ">=0.21.0"
 tags: [cad, build123d, 3d-printing, fdm, slicer]
 provides_tools:
   - vibecad_list_printer_profiles

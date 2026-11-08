@@ -8,6 +8,15 @@ import pytest
 from vibecad_public_plugin.profiles import ProfileError, load_profile_catalog, resolve_printer_profile
 
 
+def test_bundled_p2s_is_256_cube_single_tool() -> None:
+    profile = load_profile_catalog()["bambu-p2s"]
+    assert profile.display_name.startswith("Bambu Lab P2S")
+    assert (profile.bed.width_mm, profile.bed.depth_mm, profile.bed.height_mm) == (256.0, 256.0, 256.0)
+    assert profile.bed.safe_margin_mm == 0.0
+    assert profile.tool_count == 1
+    assert profile.nozzle_diameter_mm == 0.4
+
+
 def test_bundled_catalog_exposes_generic_and_legacy_example() -> None:
     catalog = load_profile_catalog()
     assert set(catalog) >= {"generic-fdm-220", "bambu-x2d"}

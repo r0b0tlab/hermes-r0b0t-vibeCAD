@@ -63,6 +63,34 @@ def fit_to_profile(metrics: Mapping[str, Any], profile: PrinterProfile) -> dict[
     }
 
 
+def nozzle_warnings(metrics: Mapping[str, Any], profile: PrinterProfile) -> list[str]:
+    """Warn when a solid bbox axis is below two nozzle diameters.
+
+    This is a lower bound, not a wall-thickness measurement. Callers must not
+    fail an export on it.
+    """
+    floor = 2 * profile.nozzle_diameter_mm
+    warnings: list[str] = []
+    for solid in metrics.get("solids") or []:
+        if not isinstance(solid, Mapping):
+            continue
+        bbox = solid.get("bbox")
+        size = bbox.get("size_mm") if isinstance(bbox, Mapping) else None
+        if not isinstance(size, Mapping):
+            continue
+        label = str(solid.get("label") or solid.get("solid_index") or "solid")
+        for axis in ("x", "y", "z"):
+            try:
+                value = float(size[axis])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if value + 1e-9 < floor:
+                warnings.append(
+                    f"{label} bbox {axis} is {value:.3f} mm, below 2× nozzle ({floor:.3f} mm); not a measured wall thickness"
+                )
+    return warnings
+
+
 METRICS_PROGRAM = r'''
 import json
 import os

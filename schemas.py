@@ -46,7 +46,7 @@ VIBECAD_INSPECT_METRICS_SCHEMA: dict[str, Any] = {
 
 VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
     "name": "vibecad_generate_preview_renders",
-    "description": "Generate deterministic PNG previews from a verified STEP file without a slicer or printer dependency.",
+    "description": "Generate deterministic PNG previews from a verified STEP file without a slicer or printer dependency. On success, emit each string in media as its own line so Desktop and messaging can show the drawings. Paths are also in renders.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -106,13 +106,14 @@ VIBECAD_STAGE_FOR_SLICER_SCHEMA: dict[str, Any] = {
 
 VIBECAD_STAGE_FOR_BAMBU_SCHEMA: dict[str, Any] = {
     "name": "vibecad_stage_for_bambu",
-    "description": "Optional Bambu Studio X2D adapter. Produces an X2D-aligned CLI/UI assembly recipe and named STL fallbacks after generic staging; it does not claim a native process project or live material binding.",
+    "description": "Optional Bambu Studio adapter for a profile that has a bundled adapter (bambu-x2d or bambu-p2s). Writes an assembly recipe and named STL fallbacks after generic staging. It does not export a native process project, bind a live AMS, or dispatch a print. P2S is single-nozzle; slots default to 1..4 unless ams_slot_capacity is set from 1 to 20.",
     "parameters": {
         "type": "object",
         "properties": {
             "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path."},
             "printer_profile": _PROFILE_ARG,
             "plate_name": {"type": "string", "description": "Optional Bambu Studio plate label for the generated assembly recipe."},
+            "ams_slot_capacity": {"type": "integer", "minimum": 1, "maximum": 20, "description": "Optional AMS slot ceiling. P2S Combo defaults to 4 and rejects values above 20."},
             "bambu_slots": {
                 "type": "object",
                 "description": "Every part label mapped to its positive Bambu filament slot number.",

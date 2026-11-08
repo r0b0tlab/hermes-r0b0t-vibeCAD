@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-r0b0t-vibecad"
-version = "0.1.2"
-description = "Profile-driven Hermes build123d plugin for generic FDM printer workflows"
+version = "0.2.0"
+description = "Profile-driven Hermes build123d plugin for FDM printers, including Bambu X2D and P2S AMS Combo handoffs"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
@@ -36,6 +36,8 @@ include = [
   "*.py",
   "profiles/*.json",
   "scripts/*.py",
+  "desktop/plugin.js",
+  "skills/**",
 ]
 
 [tool.pytest.ini_options]

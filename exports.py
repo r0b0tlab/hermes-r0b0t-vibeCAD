@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import ConfigError, Settings, cad_python, ensure_workspace, project_dirs, project_root_for, resolve_profile, resolve_workspace_file, safe_output_stem
-from .geometry import GeometryError, METRICS_PROGRAM, fit_to_profile
+from .geometry import GeometryError, METRICS_PROGRAM, fit_to_profile, nozzle_warnings
 
 
 MAX_TOOL_TEXT = 12000
@@ -140,6 +140,7 @@ def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str,
             raise ExportError("model exited without writing VIBECAD_OUTPUT_STEP")
         metrics = inspect_step(staged_step, settings)
         bed_fit = fit_to_profile(metrics, profile)
+        warnings = nozzle_warnings(metrics, profile)
         if not metrics.get("valid_brep") or not metrics.get("is_valid"):
             raise ExportError("STEP B-rep validity failed")
         if int(metrics.get("n_solids", 0)) < 1:
@@ -152,7 +153,7 @@ def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str,
         os.replace(staged_step, final_step)
         os.replace(staged_stl, final_stl)
         os.replace(staged_3mf, final_3mf)
-        result.update({"success": True, "metrics": metrics, "bed_fit": bed_fit, "mesh_export": meshed, "printer_validation": "passed"})
+        result.update({"success": True, "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": warnings, "mesh_export": meshed, "printer_validation": "passed"})
     except (ConfigError, GeometryError, ExportError) as exc:
         result["error"] = str(exc)
         result["printer_validation"] = "failed"
@@ -171,6 +172,6 @@ def inspect_metrics(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
         profile = resolve_profile(settings, args)
         metrics = inspect_step(step_file, settings)
         bed_fit = fit_to_profile(metrics, profile)
-        return {"success": bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "printer_validation": "passed" if bed_fit["fits"] else "failed"}
+        return {"success": bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": nozzle_warnings(metrics, profile), "printer_validation": "passed" if bed_fit["fits"] else "failed"}
     except (ConfigError, GeometryError, ExportError) as exc:
         return {"success": False, "error": str(exc), "printer_validation": "failed"}

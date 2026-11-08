@@ -122,6 +122,6 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
         missing = [path for path in outputs.values() if not Path(path).is_file() or Path(path).stat().st_size == 0]
         if missing:
             raise RenderError(f"renderer did not create: {missing}")
-        return {"success": True, "step_file": str(step_file), "renders": rendered["outputs"]}
+        return {"success": True, "step_file": str(step_file), "renders": rendered["outputs"], "media": [f"MEDIA:{path}" for path in rendered["outputs"].values()]}
     except (ConfigError, ExportError, RenderError) as exc:
         return {"success": False, "error": str(exc)}
