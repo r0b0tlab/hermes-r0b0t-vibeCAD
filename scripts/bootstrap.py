@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,20 +21,29 @@ def venv_python_path(venv_dir: Path, *, windows: bool) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--venv", required=True, help="Target virtual-environment directory")
-    parser.add_argument("--python", default=sys.executable, help="Python 3.12+ interpreter used to create the venv")
+    parser.add_argument("--python", default=sys.executable, help="Python 3.12 or 3.13 interpreter used to create the venv")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     venv_dir = Path(args.venv).expanduser().resolve()
-    creator = Path(args.python).expanduser()
-    if not creator.is_file() or not os.access(creator, os.X_OK):
-        raise SystemExit(f"Python interpreter is unavailable: {creator}")
+    if not (REPO_ROOT / "pyproject.toml").is_file():
+        raise SystemExit("Run bootstrap.py from a source checkout, not an installed wheel")
+    requested = os.path.expanduser(args.python)
+    resolved = shutil.which(requested)
+    if resolved is None:
+        raise SystemExit(f"Python interpreter is unavailable: {requested}")
+    creator = Path(resolved).resolve()
+    version_check = subprocess.run(
+        [str(creator), "-c", "import sys; sys.exit(0 if (3, 12) <= sys.version_info[:2] < (3, 14) else 1)"],
+        check=False,
+    )
+    if version_check.returncode:
+        raise SystemExit(f"CAD Python must be 3.12 or 3.13: {creator}")
     subprocess.run([str(creator), "-m", "venv", str(venv_dir)], check=True)
     cad_python = venv_python_path(venv_dir, windows=os.name == "nt")
-    subprocess.run([str(cad_python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-    subprocess.run([str(cad_python), "-m", "pip", "install", "--upgrade", f"{REPO_ROOT}[cad]"], check=True)
+    subprocess.run([str(cad_python), "-m", "pip", "install", f"{REPO_ROOT}[cad]"], check=True)
     print(cad_python)
     return 0
 

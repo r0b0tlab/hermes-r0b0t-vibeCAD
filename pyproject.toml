@@ -27,7 +27,7 @@ cad = [
   "Pillow>=12.3.0,<13",
   "lib3mf>=2.5.0,<3",
 ]
-test = ["pytest>=8.3.5,<9"]
+test = ["pytest>=8.3.5,<9", "hatchling>=1.27.0,<2"]
 
 [tool.hatch.build]
 include = [
@@ -39,6 +39,30 @@ include = [
   "desktop/plugin.js",
   "skills/**",
 ]
+
+# The Hermes plugin remains rooted at the repository top level. Map the same
+# sources into a conventional import package only when building a wheel.
+[tool.hatch.build.targets.wheel]
+only-include = ["hermes_r0b0t_vibecad"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"__init__.py" = "hermes_r0b0t_vibecad/__init__.py"
+"adapters.py" = "hermes_r0b0t_vibecad/adapters.py"
+"bambu.py" = "hermes_r0b0t_vibecad/bambu.py"
+"config.py" = "hermes_r0b0t_vibecad/config.py"
+"exports.py" = "hermes_r0b0t_vibecad/exports.py"
+"geometry.py" = "hermes_r0b0t_vibecad/geometry.py"
+"handoff.py" = "hermes_r0b0t_vibecad/handoff.py"
+"parameters.py" = "hermes_r0b0t_vibecad/parameters.py"
+"profiles.py" = "hermes_r0b0t_vibecad/profiles.py"
+"renders.py" = "hermes_r0b0t_vibecad/renders.py"
+"runtime.py" = "hermes_r0b0t_vibecad/runtime.py"
+"schemas.py" = "hermes_r0b0t_vibecad/schemas.py"
+"plugin.yaml" = "hermes_r0b0t_vibecad/plugin.yaml"
+"profiles" = "hermes_r0b0t_vibecad/profiles"
+"scripts" = "hermes_r0b0t_vibecad/scripts"
+"desktop/plugin.js" = "hermes_r0b0t_vibecad/desktop/plugin.js"
+"skills" = "hermes_r0b0t_vibecad/skills"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
