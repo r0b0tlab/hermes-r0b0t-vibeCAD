@@ -12,6 +12,21 @@ from vibecad_public_plugin.handoff import stage_for_slicer
 from tests.test_bambu_adapter import _exported_step, _solids_map
 
 
+@pytest.mark.parametrize("stage", [stage_for_slicer, stage_for_bambu])
+def test_revision_parent_symlink_cannot_escape_workspace(tmp_path, stage):
+    settings, step = _exported_step(tmp_path)
+    outside = tmp_path / "outside-workspace"
+    outside.mkdir()
+    revision_parent = Path(step).parent / "handoff-revisions"
+    try:
+        revision_parent.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is unavailable on this platform")
+    result = stage(settings, args(step))
+    assert result["success"] is False, result
+    assert not list(outside.iterdir())
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 

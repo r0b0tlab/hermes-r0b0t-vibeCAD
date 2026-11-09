@@ -108,8 +108,15 @@ def stage_for_slicer(settings: Settings, args: Mapping[str, Any], *, physical_vo
         workspace = ensure_workspace(settings)
         project = project_root_for(step_file, workspace)
         exports_dir, _renders_dir = project_dirs(project)
-        candidate = exports_dir / "handoff-revisions" / uuid.uuid4().hex
-        candidate.mkdir(parents=True, exist_ok=False)
+        revision_parent = exports_dir / "handoff-revisions"
+        if revision_parent.is_symlink():
+            raise HandoffError("handoff revision directory must not be a symlink")
+        revision_parent.mkdir(exist_ok=True)
+        if (revision_parent.is_symlink() or not revision_parent.is_dir()
+                or revision_parent.resolve().parent != exports_dir.resolve()):
+            raise HandoffError("handoff revision directory must stay in exports")
+        candidate = revision_parent / uuid.uuid4().hex
+        candidate.mkdir(exist_ok=False)
         revision = candidate
         source_hash = sha256(step_file)
         snapshot = revision / "source.step"
