@@ -34,13 +34,16 @@ def bounded(text: str | None, limit: int = MAX_TOOL_TEXT) -> str:
 
 
 def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapping[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy()
-    environment.update({"PYTHONUNBUFFERED": "1", "MPLBACKEND": "Agg"})
+    # Do not pass provider credentials, Python injection settings or inherited
+    # VIBECAD_* values to the CAD child. This is not a filesystem sandbox.
+    permitted = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR",
+                 "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+    environment = {key: os.environ[key] for key in permitted if key in os.environ}
+    environment.update({"PYTHONUNBUFFERED": "1", "PYTHONNOUSERSITE": "1", "MPLBACKEND": "Agg"})
     if env_updates:
+        if any(not isinstance(key, str) or not key.startswith("VIBECAD_") for key in env_updates):
+            raise ExportError("invalid CAD subprocess environment key")
         environment.update({key: str(value) for key, value in env_updates.items()})
-    environment["PYTHONNOUSERSITE"] = "1"
-    for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"):
-        environment.pop(key, None)
 
     # Drain both pipes continuously while retaining only their beginning and end.
     # This bounds memory even when trusted model code emits unlimited diagnostics.

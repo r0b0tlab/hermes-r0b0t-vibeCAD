@@ -201,6 +201,32 @@ def test_subprocess_sanitizes_environment_and_bounds_output(tmp_path, monkeypatc
     assert json.loads(result.stdout.splitlines()[-1]) == {"PYTHONPATH": None, "PYTHONHOME": None, "PYTHONUSERBASE": None, "PYTHONNOUSERSITE": "1"}
 
 
+def test_cad_child_gets_only_required_environment(tmp_path, monkeypatch):
+    for key in ("OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "UNRELATED_TOKEN",
+                "VIBECAD_INHERITED_CANARY", "PYTHONPATH"):
+        monkeypatch.setenv(key, "test-only-value")
+    keys = ("OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "UNRELATED_TOKEN",
+            "VIBECAD_INHERITED_CANARY", "PYTHONPATH", "VIBECAD_OUTPUT_STEP",
+            "PYTHONNOUSERSITE", "PYTHONUNBUFFERED", "MPLBACKEND")
+    code = f"import json,os; print(json.dumps({{k:os.environ.get(k) for k in {keys!r}}}))"
+    result = exports.run_cad(settings(tmp_path), [sys.executable, "-c", code],
+                             cwd=tmp_path, env_updates={"VIBECAD_OUTPUT_STEP": str(tmp_path / "out.step")})
+    assert result.returncode == 0
+    child = json.loads(result.stdout)
+    for key in keys[:5]:
+        assert child[key] is None, f"{key} inherited by CAD child"
+    assert child["VIBECAD_OUTPUT_STEP"] == str(tmp_path / "out.step")
+    assert child["PYTHONNOUSERSITE"] == "1"
+    assert child["PYTHONUNBUFFERED"] == "1"
+    assert child["MPLBACKEND"] == "Agg"
+
+
+def test_cad_child_rejects_non_internal_environment_updates(tmp_path):
+    with pytest.raises(exports.ExportError, match="invalid CAD subprocess environment key"):
+        exports.run_cad(settings(tmp_path), [sys.executable, "-c", "pass"],
+                        cwd=tmp_path, env_updates={"OPENAI_API_KEY": "test-only-value"})
+
+
 def test_subprocess_timeout_reports_output(tmp_path):
     with pytest.raises(exports.ExportError, match="exceeded 1s") as exc:
         exports.run_cad(settings(tmp_path, 1), [sys.executable, "-c", "import time; print('started', flush=True); time.sleep(10)"], cwd=tmp_path)
