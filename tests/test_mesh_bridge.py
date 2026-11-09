@@ -168,3 +168,24 @@ def test_source_must_be_regular_stl_inside_project(context, tmp_path):
             run(context, bad)
     with pytest.raises(MeshImportError):
         run(context, source, project_root=root)
+
+
+def test_quantization_collapse_reports_scaled_output_and_does_not_publish(context):
+    vertices = np.array([
+        [0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0], [-1.0, -1.0, 1.0],
+        [1e-10, 1e-10, 0.0],
+    ])
+    faces = np.array([
+        [3, 1, 2], [0, 1, 3], [3, 2, 0],
+        [0, 2, 4], [2, 1, 4], [1, 0, 4],
+    ])
+    original = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    assert original.is_watertight and original.is_volume
+    source = put(context[1], original, 'quantization.stl')
+    before = source.read_bytes()
+    with pytest.raises(MeshImportError, match='scaled STL serialization'):
+        run(context, source, dimension_mm=240.0,
+            envelope_mm=(1000.0, 1000.0, 1000.0))
+    assert source.read_bytes() == before
+    assert not (context[1] / 'exports').exists()

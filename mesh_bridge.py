@@ -165,7 +165,13 @@ def import_stl(*, workspace_root: str | Path, project_root: str | Path,
     except Exception as exc:
         raise MeshImportError(f'cannot export STL: {exc}') from exc
     # Validate actual serialized floats, not just the in-memory transform.
-    output = _mesh(output_bytes)
+    try:
+        output = _mesh(output_bytes)
+    except MeshImportError as exc:
+        raise MeshImportError(
+            f'scaled STL serialization failed validation: {exc}; '
+            'the source was not modified and no output was published'
+        ) from exc
     bounds = output.bounds
     if np.any(bounds[0] < 0) or np.any(bounds[1] > envelope):
         raise MeshImportError('serialized mesh exceeds bed or printer envelope')
