@@ -23,6 +23,8 @@ Every successful preview invocation writes new `preview_<unique-id>_<view>.png` 
 
 ### Visual detail review
 
+Hermes reviews previews with the active session's vision route: a vision-capable main model may receive pixels natively; otherwise Hermes uses its configured auxiliary vision route. In Desktop, choose the profile-wide auxiliary model under **Settings → Models → Auxiliary models → Vision**. Explicit auxiliary configuration can change image routing and applies beyond vibeCAD. Visual review is not an anatomy or printability certification.
+
 On the final trusted STEP or prepared STL, first request `views: ["iso", "front", "back", "top"]` and actually inspect the images. Front looks from −Y with +X to the right; back looks from +Y with −X to the right. View directions use model axes, not inferred anatomy. Then request targeted details appropriate to the object: for a figure inspect face, both hands and attachment/contact points from relevant front and back angles; for other objects inspect critical joints, edges, openings and contacts. If a feature is hidden or ambiguous, choose another view or inspect geometry; a view does not reveal what is occluded. Note observed defects and uncertainty before describing quality, revise the model if needed, and repeat on the new source.
 
 Example tool input (coordinates are **illustrative**, not a detected face):
