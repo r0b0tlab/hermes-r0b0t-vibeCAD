@@ -33,7 +33,7 @@ def bounded(text: str | None, limit: int = MAX_TOOL_TEXT) -> str:
     return value if len(value) <= limit else value[: limit // 2] + "\n… [truncated] …\n" + value[-limit // 2 :]
 
 
-def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapping[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapping[str, str] | None = None, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[str]:
     # Do not pass provider credentials, Python injection settings or inherited
     # VIBECAD_* values to the CAD child. This is not a filesystem sandbox.
     permitted = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR",
@@ -67,12 +67,24 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
         return value.decode("utf-8", errors="replace")
 
     try:
-        process = subprocess.Popen(argv, cwd=str(cwd), env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=(os.name == "posix"))
+        process = subprocess.Popen(argv, cwd=str(cwd), env=environment, stdin=subprocess.PIPE if input_bytes is not None else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=(os.name == "posix"))
     except OSError as exc:
         raise ExportError(f"could not start CAD subprocess: {exc}") from exc
     threads = [threading.Thread(target=drain, args=(pipe, index), daemon=True) for index, pipe in enumerate((process.stdout, process.stderr))]
     for thread in threads:
         thread.start()
+    writer = None
+    if input_bytes is not None:
+        def feed_snapshot() -> None:
+            try:
+                pipe = process.stdin
+                assert pipe is not None
+                with pipe:
+                    pipe.write(input_bytes)
+            except (BrokenPipeError, OSError):
+                pass  # The child exited or was killed; its result is handled below.
+        writer = threading.Thread(target=feed_snapshot, daemon=True)
+        writer.start()
     timed_out = False
     try:
         process.wait(timeout=settings.timeout_s)
@@ -88,6 +100,8 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
         process.wait()
     for thread in threads:
         thread.join(timeout=1)
+    if writer is not None:
+        writer.join(timeout=1)
     stdout, stderr = captured(0), captured(1)
     if timed_out:
         raise ExportError(f"CAD subprocess exceeded {settings.timeout_s}s\nstdout:\n{bounded(stdout)}\nstderr:\n{bounded(stderr)}")
@@ -232,11 +246,27 @@ def _publish_artifacts(pairs: list[tuple[Path, Path]], exports_dir: Path) -> Non
             shutil.rmtree(backup_dir, ignore_errors=True)
 
 
-def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str, Any]:
+_SNAPSHOT_RUNNER = '''
+import hashlib, sys
+from pathlib import Path
+source = sys.stdin.buffer.read()
+script = sys.argv[1]
+if hashlib.sha256(source).hexdigest() != sys.argv[2]:
+    raise RuntimeError("approved script snapshot was truncated or corrupted")
+sys.argv = [script]
+sys.path[0] = str(Path(script).parent)
+__file__ = script
+code = compile(source, script, "exec")
+del source, script
+exec(code, globals())
+'''
+
+
+def execute_and_export(settings: Settings, args: Mapping[str, Any], *, _approved_script: tuple[Path, bytes] | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {"success": False}
     staged: list[Path] = []
     try:
-        script = resolve_workspace_file(args.get("script_path"), settings, suffixes={".py"})
+        script = _approved_script[0] if _approved_script is not None else resolve_workspace_file(args.get("script_path"), settings, suffixes={".py"})
         profile = resolve_profile(settings, args)
         stem = safe_output_stem(args.get("output_name"))
         workspace = ensure_workspace(settings)
@@ -252,7 +282,11 @@ def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str,
         staged = [staged_step, staged_stl, staged_3mf]
         for artifact in staged:
             artifact.unlink(missing_ok=True)
-        execution = run_cad(settings, [str(cad_python(settings)), str(script)], cwd=project, env_updates={"VIBECAD_OUTPUT_STEP": str(staged_step), "VIBECAD_OUTPUT_DIR": str(exports_dir), "VIBECAD_PROJECT_ROOT": str(project)})
+        env_updates = {"VIBECAD_OUTPUT_STEP": str(staged_step), "VIBECAD_OUTPUT_DIR": str(exports_dir), "VIBECAD_PROJECT_ROOT": str(project)}
+        if _approved_script is None:
+            execution = run_cad(settings, [str(cad_python(settings)), str(script)], cwd=project, env_updates=env_updates)
+        else:
+            execution = run_cad(settings, [str(cad_python(settings)), "-c", _SNAPSHOT_RUNNER, str(script), hashlib.sha256(_approved_script[1]).hexdigest()], cwd=project, env_updates=env_updates, input_bytes=_approved_script[1])
         result.update({"script_path": str(script), "project_root": str(project), "output": {"step": str(final_step), "stl": str(final_stl), "3mf": str(final_3mf)}, "return_code": execution.returncode, "stdout": bounded(execution.stdout), "stderr": bounded(execution.stderr), "printer_profile": profile.id})
         if execution.returncode != 0:
             raise ExportError("model execution failed")

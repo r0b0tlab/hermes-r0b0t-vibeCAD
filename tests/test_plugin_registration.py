@@ -23,6 +23,10 @@ class FakeContext:
         self.tools: dict[str, object] = {}
         self.skills: dict[str, object] = {}
         self.schemas: dict[str, object] = {}
+        self.hooks: dict[str, object] = {}
+
+    def register_hook(self, name: str, callback: object) -> None:
+        self.hooks[name] = callback
 
     def get_config(self, key: str, default: object = None) -> object:
         return default
@@ -40,6 +44,7 @@ def test_registers_the_public_namespaced_toolset() -> None:
     ctx = FakeContext()
     plugin.register(ctx)
     assert set(ctx.tools) == EXPECTED_TOOLS
+    assert set(ctx.hooks) == {"pre_tool_call"}
     profile_payload = json.loads(ctx.tools["vibecad_list_printer_profiles"]({}))
     assert profile_payload["success"] is True
     assert {profile["id"] for profile in profile_payload["profiles"]} >= {"generic-fdm-220", "bambu-x2d", "bambu-p2s"}
