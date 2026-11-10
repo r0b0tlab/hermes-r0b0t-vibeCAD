@@ -8,6 +8,12 @@ version: 1.0.0
 
 The plugin tools are the gate. A prose claim that a part fits, or a guessed AMS slot, is not a result.
 
+## Desktop drawings sidebar: tool → assistant attachment
+
+When presenting a model in Hermes Desktop, use the vibeCAD drawings sidebar for reviewed views. Call `vibecad_generate_preview_renders` in the **same session** as the user-facing reply; use the returned `renders` map and `media` list, not guessed paths. Inspect the actual pixels first and exclude misleading or blank views. In the assistant reply, emit each selected returned `MEDIA:/absolute/path.png` on a separate line, exactly as returned, with no backticks, quotes or code fence. Include concise context unless the user explicitly asks for paths only.
+
+The `media` array inside a tool result does not itself populate the sidebar: the assistant's standalone `MEDIA:` attachment mounts the corresponding inline tool-media card, which supplies the sidebar. A plain file path, arbitrary CAD render, or direct Python/CLI rendering fallback can appear in chat but is not equivalent to a plugin-linked tool result. Use a fresh tool call and emit its returned media after every relevant revision; keep views tied to the current source hashes and session. Never claim the sidebar populated until the user or a live UI check confirms it. If it stays empty, check that the Desktop plugin is enabled under Capabilities → Plugins, the correct session/transcript is open, and the current process has loaded the plugin; do not change the user's toggles or restart their app without permission. If the tool-call transport corrupts array arguments, omit optional `views` and inspect the default results; disclose any fallback that cannot populate the sidebar.
+
 ## Generation provider routing
 
 - **Default to the local build123d workflow**: author trusted local parametric geometry and run the vibeCAD tools. This path does not require Meshy or an API key. A pre-existing local STL can also be inspected with the mesh workflow below; that is not a cloud generation call.

@@ -8,6 +8,19 @@ from .test_plugin_registration import EXPECTED_TOOLS, FakeContext
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_sidebar_instructions_explain_the_tool_to_media_contract():
+    from vibecad_public_plugin.schemas import VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA
+
+    skill = (ROOT / 'skills/fdm-handoff/SKILL.md').read_text(encoding='utf-8')
+    description = VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA['description']
+    for term in ('sidebar', 'vibecad_generate_preview_renders', 'same session',
+                 'MEDIA:', 'separate line', 'backtick'):
+        assert term.lower() in skill.lower()
+    for term in ('sidebar', 'same session', 'MEDIA:', 'separate line', 'backtick'):
+        assert term.lower() in description.lower()
+    assert 'never claim' in skill.lower()
+
+
 def test_local_workflow_is_default_and_meshy_is_explicitly_optional():
     skill = (ROOT / 'skills/fdm-handoff/SKILL.md').read_text(encoding='utf-8')
     readme = (ROOT / 'README.md').read_text(encoding='utf-8')

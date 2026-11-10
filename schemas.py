@@ -46,7 +46,7 @@ VIBECAD_INSPECT_METRICS_SCHEMA: dict[str, Any] = {
 
 VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
     "name": "vibecad_generate_preview_renders",
-    "description": "Generate depth-tested PNG previews or enlarged detail viewports from exactly one trusted STEP or STL file. STL preview is geometry only and does not check printability. Images are visual aids, not dimensional, printability or anatomy certification. Returns fresh paths, source and image SHA-256 hashes and view/region metadata; use renders instead of constructing filenames. Emit each media string on its own line.",
+    "description": "Generate depth-tested PNG previews or detail views from a trusted STEP or STL; these do not prove printability. To show reviewed model views in the Desktop drawings sidebar, call this tool in the same session, inspect its returned images, then emit each selected returned MEDIA: string on a separate line in your assistant reply without backticks or a code fence. Use returned paths and hashes; never invent paths or claim the pane populated without confirmation.",
     "parameters": {
         "type": "object",
         "properties": {
