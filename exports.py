@@ -9,6 +9,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -34,6 +35,12 @@ def bounded(text: str | None, limit: int = MAX_TOOL_TEXT) -> str:
 
 
 def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapping[str, str] | None = None, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[str]:
+    """Run CAD and clean up its owned process group where POSIX permits it.
+
+    This is not a sandbox: descendants can leave the group or become
+    unsignalable. Windows cleanup covers only the direct child, not its tree.
+    Other code must not reap this invocation's child concurrently.
+    """
     # Do not pass provider credentials, Python injection settings or inherited
     # VIBECAD_* values to the CAD child. This is not a filesystem sandbox.
     permitted = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR",
@@ -66,42 +73,81 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
             value = value[:half] + b"\n... [capture truncated] ...\n" + value[-half:]
         return value.decode("utf-8", errors="replace")
 
+    # POSIX waitid(WNOWAIT) lets us observe exit without reaping the session
+    # leader. Its reserved PID pins the process-group ID until after killpg;
+    # wait()/poll() before killpg could signal an unrelated, reused group.
+    if os.name == "posix" and not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
+        raise ExportError("CAD process-group cleanup requires POSIX waitid with WNOWAIT")
     try:
         process = subprocess.Popen(argv, cwd=str(cwd), env=environment, stdin=subprocess.PIPE if input_bytes is not None else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=(os.name == "posix"))
     except OSError as exc:
         raise ExportError(f"could not start CAD subprocess: {exc}") from exc
-    threads = [threading.Thread(target=drain, args=(pipe, index), daemon=True) for index, pipe in enumerate((process.stdout, process.stderr))]
-    for thread in threads:
-        thread.start()
+    threads = []
     writer = None
-    if input_bytes is not None:
-        def feed_snapshot() -> None:
-            try:
-                pipe = process.stdin
-                assert pipe is not None
-                with pipe:
-                    pipe.write(input_bytes)
-            except (BrokenPipeError, OSError):
-                pass  # The child exited or was killed; its result is handled below.
-        writer = threading.Thread(target=feed_snapshot, daemon=True)
-        writer.start()
     timed_out = False
     try:
-        process.wait(timeout=settings.timeout_s)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+        for index, pipe in enumerate((process.stdout, process.stderr)):
+            thread = threading.Thread(target=drain, args=(pipe, index), daemon=True)
+            thread.start()
+            threads.append(thread)
+        if input_bytes is not None:
+            def feed_snapshot() -> None:
+                try:
+                    pipe = process.stdin
+                    assert pipe is not None
+                    with pipe:
+                        pipe.write(input_bytes)
+                except (BrokenPipeError, OSError):
+                    pass
+            writer = threading.Thread(target=feed_snapshot, daemon=True)
+            writer.start()
         if os.name == "posix":
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            deadline = time.monotonic() + settings.timeout_s
+            while os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                time.sleep(min(remaining, .02))
         else:
-            process.kill()
-        process.wait()
-    for thread in threads:
-        thread.join(timeout=1)
-    if writer is not None:
-        writer.join(timeout=1)
+            try:
+                process.wait(timeout=settings.timeout_s)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    finally:
+        try:
+            if os.name == "posix":
+                # An outside SIGCHLD handler/reaper can steal our child. Never
+                # signal the numeric group ID if its leader is no longer ours.
+                try:
+                    leader_exit = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                except ChildProcessError as exc:
+                    raise ExportError("lost ownership of CAD subprocess; group not signaled") from exc
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    # Darwin reports EPERM for a group containing only the
+                    # unreaped zombie leader. It can also mean no member is
+                    # signalable, so this is not a containment guarantee.
+                    if sys.platform != "darwin" or leader_exit is None:
+                        raise
+            elif process.poll() is None:
+                # Windows has no job-object supervision here: direct child only.
+                process.kill()
+        finally:
+            # A concurrent foreign reaper can still race the ownership check;
+            # callers must not reap this invocation's child in another thread.
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired as exc:
+                raise ExportError("CAD subprocess did not exit after cleanup") from exc
+            finally:
+                for thread in threads:
+                    thread.join(timeout=1)
+                if writer is not None:
+                    writer.join(timeout=1)
     stdout, stderr = captured(0), captured(1)
     if timed_out:
         raise ExportError(f"CAD subprocess exceeded {settings.timeout_s}s\nstdout:\n{bounded(stdout)}\nstderr:\n{bounded(stderr)}")

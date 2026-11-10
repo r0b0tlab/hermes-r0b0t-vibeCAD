@@ -231,3 +231,117 @@ def test_subprocess_timeout_reports_output(tmp_path):
     with pytest.raises(exports.ExportError, match="exceeded 1s") as exc:
         exports.run_cad(settings(tmp_path, 1), [sys.executable, "-c", "import time; print('started', flush=True); time.sleep(10)"], cwd=tmp_path)
     assert "started" in str(exc.value)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups required")
+@pytest.mark.parametrize("outcome", ["success", "failure", "timeout", "cancel"])
+def test_owned_descendants_cleaned_without_touching_unrelated_process(tmp_path, monkeypatch, outcome):
+    # Both children wait on the same release; the independent child confirms
+    # the gate was observed even if the CAD descendant was killed beforehand.
+    child_code = '''
+import os, sys, time
+from pathlib import Path
+root, name = Path(sys.argv[1]), sys.argv[2]
+(root / (name + "-pid.tmp")).write_text(str(os.getpid()))
+os.replace(root / (name + "-pid.tmp"), root / (name + "-ready"))
+while not (root / "release").exists():
+    time.sleep(.005)
+(root / (name + "-sentinel")).touch()
+'''
+    parent_code = '''
+import subprocess, sys, time
+from pathlib import Path
+root, outcome, code = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+subprocess.Popen([sys.executable, "-c", code, str(root), "owned"],
+                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+while not (root / "owned-ready").exists():
+    time.sleep(.005)
+if outcome in ("timeout", "cancel"):
+    time.sleep(30)
+sys.exit(7 if outcome == "failure" else 0)
+'''
+    control = subprocess.Popen([sys.executable, "-c", child_code, str(tmp_path), "control"],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if outcome == "cancel":
+        real_waitid = os.waitid
+        cancelled = False
+        def interrupt_wait(*args):
+            nonlocal cancelled
+            if not cancelled:
+                deadline = time.monotonic() + 5
+                while not (tmp_path / "owned-ready").exists():
+                    assert time.monotonic() < deadline, "owned descendant did not start"
+                    time.sleep(.005)
+                cancelled = True
+                raise KeyboardInterrupt("injected cancellation")
+            return real_waitid(*args)
+        monkeypatch.setattr(os, "waitid", interrupt_wait)
+    try:
+        argv = [sys.executable, "-c", parent_code, str(tmp_path), outcome, child_code]
+        if outcome == "timeout":
+            with pytest.raises(exports.ExportError, match="exceeded"):
+                exports.run_cad(settings(tmp_path, 1), argv, cwd=tmp_path)
+        elif outcome == "cancel":
+            with pytest.raises(KeyboardInterrupt, match="injected cancellation"):
+                exports.run_cad(settings(tmp_path), argv, cwd=tmp_path)
+        else:
+            result = exports.run_cad(settings(tmp_path), argv, cwd=tmp_path)
+            assert result.returncode == (7 if outcome == "failure" else 0)
+        assert (tmp_path / "owned-ready").exists()
+        owned_pid = int((tmp_path / "owned-ready").read_text())
+        deadline = time.monotonic() + 5
+        while True:
+            probe = subprocess.run(["ps", "-o", "stat=", "-p", str(owned_pid)],
+                                   capture_output=True, text=True, check=False, timeout=2)
+            assert probe.returncode in (0, 1), probe.stderr
+            state = probe.stdout.strip()
+            if not state or state.startswith("Z"):
+                break
+            assert time.monotonic() < deadline, "owned descendant is still running"
+            time.sleep(.01)
+        (tmp_path / "release").touch()
+        assert control.wait(timeout=5) == 0
+        assert (tmp_path / "control-sentinel").exists()
+        assert not (tmp_path / "owned-sentinel").exists()
+    finally:
+        (tmp_path / "release").touch()
+        if control.poll() is None:
+            control.kill()
+        control.wait(timeout=5)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX waitid required")
+def test_reaped_leader_is_never_signaled_by_numeric_group_id(tmp_path, monkeypatch):
+    real_waitid = os.waitid
+    real_killpg = os.killpg
+    stolen = False
+    signals = []
+    def reaping_waitid(*args):
+        nonlocal stolen
+        result = real_waitid(*args)
+        if result is not None and not stolen:
+            os.waitpid(args[1], 0)  # Simulate an external SIGCHLD reaper.
+            stolen = True
+        return result
+    def record_killpg(pgid, sig):
+        signals.append((pgid, sig))
+        return real_killpg(pgid, sig)
+    monkeypatch.setattr(os, "waitid", reaping_waitid)
+    monkeypatch.setattr(os, "killpg", record_killpg)
+    with pytest.raises(exports.ExportError, match="lost ownership.*not signaled"):
+        exports.run_cad(settings(tmp_path), [sys.executable, "-c", "pass"], cwd=tmp_path)
+    assert stolen
+    assert not signals
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX waitid required")
+def test_group_signal_precedes_leader_reap(tmp_path, monkeypatch):
+    real_killpg = os.killpg
+    observed = []
+    def check_leader(pgid, sig):
+        observed.append(os.waitid(os.P_PID, pgid, os.WEXITED | os.WNOHANG | os.WNOWAIT))
+        return real_killpg(pgid, sig)
+    monkeypatch.setattr(os, "killpg", check_leader)
+    result = exports.run_cad(settings(tmp_path), [sys.executable, "-c", "pass"], cwd=tmp_path)
+    assert result.returncode == 0
+    assert len(observed) == 1 and observed[0] is not None
