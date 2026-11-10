@@ -29,6 +29,25 @@ class ExportError(ValueError):
     """A model execution, CAD validation, or artifact publication error."""
 
 
+class CadCancelled(ExportError):
+    """The host requested cooperative cancellation on this tool thread."""
+
+
+def _check_cancelled() -> None:
+    # Hermes has no documented plugin cancellation API as of this integration.
+    # This host-internal hook is optional only when the module is absent, so
+    # standalone Python still works. Other import/API failures must not silently
+    # claim that cancellation is supported.
+    try:
+        from tools.interrupt import is_interrupted
+    except ModuleNotFoundError as exc:
+        if exc.name not in ("tools", "tools.interrupt"):
+            raise
+        return
+    if is_interrupted():
+        raise CadCancelled("CAD operation cancelled by host")
+
+
 def bounded(text: str | None, limit: int = MAX_TOOL_TEXT) -> str:
     value = text or ""
     return value if len(value) <= limit else value[: limit // 2] + "\n… [truncated] …\n" + value[-limit // 2 :]
@@ -49,6 +68,7 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
     POSIX uses an isolated supervisor so host-wide child reapers cannot steal
     the CAD group anchor or its exit status.
     """
+    _check_cancelled()
     # Do not pass provider credentials, Python injection settings or inherited
     # VIBECAD_* values to the CAD child. This is not a filesystem sandbox.
     permitted = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR",
@@ -123,9 +143,15 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
         if os.name == "posix":
             # The helper reports only after it has waited for its anchor's
             # SIGKILL. This dedicated pipe is independent of host waitpid.
-            ready = _wait_readable(report_read, settings.timeout_s + 10)
-            if not ready:
-                raise ExportError("CAD supervision did not report cleanup")
+            deadline = time.monotonic() + settings.timeout_s + 10
+            while True:
+                _check_cancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ExportError("CAD supervision did not report cleanup")
+                if _wait_readable(report_read, min(remaining, 0.1)):
+                    break
+            _check_cancelled()
             raw = os.read(report_read, 65536)
             reported = True
             try:
@@ -140,10 +166,19 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
                 if not isinstance(returncode, int):
                     raise ExportError("CAD supervisor returned no process status")
         else:
-            try:
-                returncode = process.wait(timeout=settings.timeout_s)
-            except subprocess.TimeoutExpired:
-                timed_out = True
+            deadline = time.monotonic() + settings.timeout_s
+            while True:
+                _check_cancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    returncode = process.wait(timeout=min(remaining, 0.1))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            _check_cancelled()
     finally:
         if os.name == "posix":
             # EOF requests cleanup even if the calling thread is cancelled or
@@ -172,6 +207,7 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
                 thread.join(timeout=1)
             if writer is not None:
                 writer.join(timeout=1)
+    _check_cancelled()
     stdout, stderr = captured(0), captured(1)
     if timed_out:
         raise ExportError(f"CAD subprocess exceeded {settings.timeout_s}s\nstdout:\n{bounded(stdout)}\nstderr:\n{bounded(stderr)}")
@@ -294,9 +330,11 @@ def _publish_artifacts(pairs: list[tuple[Path, Path]], exports_dir: Path) -> Non
             else:
                 backups[target] = None
         for source, target in pairs:
+            _check_cancelled()
             os.replace(source, target)
             replaced.append(target)
-    except OSError as exc:
+        _check_cancelled()
+    except (OSError, CadCancelled) as exc:
         failures = []
         for target in reversed(replaced):
             try:
@@ -310,6 +348,8 @@ def _publish_artifacts(pairs: list[tuple[Path, Path]], exports_dir: Path) -> Non
         if failures:
             preserve_backup = True
             raise ExportError(f"publication failed: {exc}; rollback failed: {'; '.join(failures)}; recovery backups retained at {backup_dir}") from exc
+        if isinstance(exc, CadCancelled):
+            raise
         raise ExportError(f"publication failed; previous artifacts restored: {exc}") from exc
     finally:
         if not preserve_backup:
@@ -382,16 +422,20 @@ def execute_and_export(settings: Settings, args: Mapping[str, Any], *, _approved
         staged.append(staged_status)
         staged_status.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         with _publication_lock(exports_dir):
+            _check_cancelled()
             _publish_artifacts(list(zip(staged[:3], [final_step, final_stl, final_3mf])) + [(staged_status, _status_path(exports_dir))], exports_dir)
     except (ConfigError, GeometryError, ExportError, OSError) as exc:
         result["success"] = False
         result["error"] = str(exc)
         result["printer_validation"] = "failed"
         exports = Path(result["output"]["step"]).parent if isinstance(result.get("output"), Mapping) else None
-        if exports and exports.is_dir():
+        if exports and exports.is_dir() and not isinstance(exc, CadCancelled):
             try:
                 with _publication_lock(exports):
+                    _check_cancelled()
                     atomic_json(_status_path(exports), result)
+            except CadCancelled as cancel_exc:
+                result["error"] = str(cancel_exc)
             except OSError as status_exc:
                 result["status_error"] = str(status_exc)
     finally:
