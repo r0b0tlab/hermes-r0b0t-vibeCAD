@@ -8,7 +8,7 @@ const source = await readFile(new URL('../desktop/plugin.js', import.meta.url), 
 const tick = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)) }
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 
-async function setup({ media = true } = {}) {
+async function setup({ media = true, nativeButtons = false } = {}) {
   const atom = value => ({ get: () => value, set: next => { value = next } })
   const focusedStoredSessionId = atom(null), focusedSessionId = atom(null)
   const history = new Map(), requests = []
@@ -17,6 +17,7 @@ async function setup({ media = true } = {}) {
     atom, useValue: atom => atom.get(), EmptyState: 'EmptyState',
     host: { state: { focusedStoredSessionId, focusedSessionId }, request: (...args) => { requests.push(args); return request(...args) } },
     ...(media ? { TOOL_MEDIA_RENDERER_AREA: 'transcript.toolMedia' } : {}),
+    ...(nativeButtons ? { Button: 'button' } : {}),
   }
   let active
   const react = {
@@ -58,13 +59,85 @@ const bridged = (...ids) => ids.map(tool_call_id => ({
   tool_call_id,
   args: { calls: [{ name: 'vibecad_generate_preview_renders', arguments: { resolution: '800' } }] },
 }))
-const card = (env, { session = 'a', id = 'one', view = 'iso', renders, resolver, fallback = 'BUILTIN' } = {}) => {
+const card = (env, { session = 'a', id = 'one', view = 'iso', renders, resolver, fallback = 'BUILTIN', result = {} } = {}) => {
   const path = renders?.[view] || `/${id}/${view}.png`
   const file = { path, name: `preview_${view}.png`, kind: 'image', resolveUrl: resolver || (() => Promise.resolve(`url:${path}`)) }
-  const props = { sessionId: session, toolCallId: id, file, result: JSON.stringify({ renders: renders || { [view]: path } }), fallback }
+  const props = { sessionId: session, toolCallId: id, file, result: JSON.stringify({ ...result, renders: renders || { [view]: path } }), fallback }
   return { component: env.mount(env.mediaContribution.data.render(props)), props }
 }
-const paneNames = env => { const result = env.pane.render(); return result.type === 'EmptyState' ? [] : Array.from(result.props.children, figure => figure.props.children[0].props.children) }
+const walk = node => !node || typeof node !== 'object' ? [] : [node, ...[].concat(node.props?.children || []).flatMap(walk)]
+const text = node => !node ? '' : typeof node === 'string' || typeof node === 'number' ? String(node) : [].concat(node.props?.children || []).map(text).join(' ')
+const paneNames = env => walk(env.pane.render()).filter(node => node.type === 'button' && node.props['data-view']).map(node => node.props['data-view'].toUpperCase().replace(/^(.+?)_DETAIL_/, '$1 · DETAIL: ').replaceAll('_', ' '))
+const preview = env => walk(env.pane.render()).find(node => node.type === 'img' && node.props['data-preview'])
+
+test('sheet exposes actual metadata and selectable available views only', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('one'))
+  const renders = { iso: '/r/iso.png', front_detail_contact: '/r/front.png', top: '/r/top.png' }
+  const result = { step_file: '/models/bracket.step', source_sha256: 'a'.repeat(64), render_metadata: { front_detail_contact: { view: 'front', resolution: 1200, region: { label: 'contact', x_min: 0.4, y_min: 0.4, x_max: 0.6, y_max: 0.6 } } } }
+  const iso = card(env, { renders, result }), front = card(env, { renders, result, view: 'front_detail_contact' })
+  iso.component.render(); front.component.render(); await tick()
+  let pane = env.pane.render(), body = text(pane)
+  assert.match(body, /bracket\.step/); assert.match(body, /STEP/); assert.match(body, /a{12}/)
+  assert.match(body, /2 of 3/); assert.match(body, /MEDIA:/)
+  assert.deepEqual(paneNames(env), ['ISO', 'FRONT · DETAIL: CONTACT'])
+  const button = walk(pane).find(node => node.type === 'button' && node.props['data-view'] === 'front_detail_contact')
+  assert.equal(button.props.type, 'button'); button.props.onClick()
+  pane = env.pane.render(); body = text(pane)
+  assert.equal(preview(env).props.src, 'url:/r/front.png')
+  assert.match(body, /1200/); assert.match(body, /contact/); assert.match(body, /0\.4/)
+  assert.equal(walk(pane).find(node => node.type === 'button' && node.props['data-view'] === 'front_detail_contact').props['aria-pressed'], true)
+})
+
+test('selection and actual metadata do not leak between sessions or revisions', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('one', 'two')); env.history.set('b', rows('b1'))
+  const renders = { iso: '/one/iso.png', top: '/one/top.png' }
+  for (const view of Object.keys(renders)) card(env, { renders, view, result: { step_file: '/models/old.step' } }).component.render()
+  await tick(); walk(env.pane.render()).find(n => n.type === 'button' && n.props['data-view'] === 'top').props.onClick()
+  assert.equal(preview(env).props.src, 'url:/one/top.png')
+  const next = card(env, { id: 'two', view: 'iso', result: { mesh_file: '/models/new.stl' } }); next.component.render(); await tick()
+  assert.equal(preview(env).props.src, 'url:/two/iso.png'); assert.match(text(env.pane.render()), /new\.stl/); assert.doesNotMatch(text(env.pane.render()), /old\.step/)
+  card(env, { session: 'b', id: 'b1', view: 'top' }).component.render(); await tick(); env.stored.set('b')
+  assert.equal(preview(env).props.src, 'url:/b1/top.png'); assert.doesNotMatch(text(env.pane.render()), /new\.stl/)
+  env.stored.set('a'); assert.equal(preview(env).props.src, 'url:/two/iso.png')
+})
+
+test('zoom, view buttons and narrow-pane layout stay usable', async () => {
+  const env = await setup({ nativeButtons: true }); env.stored.set('a'); env.history.set('a', rows('one', 'two'))
+  const renders = { iso: '/one/iso.png', top: '/one/top.png' }
+  for (const view of Object.keys(renders)) card(env, { renders, view }).component.render()
+  await tick()
+  let pane = env.pane.render()
+  const strip = walk(pane).find(n => n.props?.['aria-label'] === 'Drawing views')
+  assert.equal(strip.props.style.overflowX, 'auto'); assert.equal(strip.props.style.maxWidth, '100%')
+  const zoom = walk(pane).find(n => n.type === 'button' && text(n) === 'Zoom 2×')
+  assert.equal(preview(env).props.style.width, '100%'); zoom.props.onClick()
+  assert.equal(preview(env).props.style.width, '200%')
+  pane = env.pane.render(); assert.equal(walk(pane).find(n => n.type === 'button' && text(n) === 'Fit').props['aria-pressed'], true)
+  walk(pane).find(n => n.type === 'button' && text(n) === 'Fit').props.onClick()
+  assert.equal(preview(env).props.style.width, '100%')
+  walk(env.pane.render()).find(n => n.type === 'button' && text(n) === 'Zoom 2×').props.onClick()
+  card(env, { id: 'two', result: { mesh_file: 'C:\\\\models\\\\part.stl' } }).component.render(); await tick()
+  assert.equal(preview(env).props.style.width, '100%'); assert.match(text(env.pane.render()), /part\.stl/)
+})
+
+test('loading, failed media, missing metadata and stale callbacks remain honest', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('one'))
+  const slow = deferred(), c = card(env, { resolver: () => slow.promise }); c.component.render(); await tick()
+  assert.equal(env.pane.render().props.title, 'Loading drawing')
+  slow.reject(Error('missing')); await tick(); assert.equal(env.pane.render().props.title, 'Drawing unavailable')
+  const ok = card(env); ok.component.render(); await tick()
+  assert.match(text(env.pane.render()), /Source model unavailable/)
+  assert.doesNotMatch(text(env.pane.render()), /SHA-256|Resolution|ready|nozzle|material/i)
+  assert.equal(preview(env).props.src, 'url:/one/iso.png')
+  preview(env).props.onError(); assert.equal(env.pane.render().props.title, 'Drawing unavailable')
+})
+
+test('conflicting metadata for a reused call never mixes provenance', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('one'))
+  card(env, { result: { step_file: '/first.step' } }).component.render(); await tick()
+  card(env, { result: { step_file: '/second.step' } }).component.render(); await tick()
+  assert.deepEqual(paneNames(env), [])
+})
 
 test('detail payload labels and back view stay distinct in card and pane', async () => {
   const env = await setup(); env.stored.set('a'); env.history.set('a', rows('detail'))
@@ -125,7 +198,7 @@ test('out-of-order history and URL completion, cleanup and fallback', async () =
   one.resolve({ messages: rows('old') }); slowUrl.resolve('old-url'); await tick()
   // URL completion causes another history query: use a fresh snapshot.
   assert.deepEqual(paneNames(env), ['ISO'])
-  assert.equal(env.pane.render().props.children[0].props.children[1].props.src, 'url:/new/iso.png')
+  assert.equal(preview(env).props.src, 'url:/new/iso.png')
   const gone = deferred(), unmounted = card(env, { id: 'gone', resolver: () => gone.promise }); unmounted.component.render(); unmounted.component.unmount(); gone.resolve('gone-url'); await tick()
   assert.equal(unmounted.component.render(), 'BUILTIN')
 })
