@@ -237,7 +237,7 @@ function DrawingPane() {
           style: { ...buttonStyle, display: 'flex', flexDirection: 'column', whiteSpace: 'normal', flex: '0 0 76px', borderColor: name === selected ? 'var(--ui-accent)' : 'var(--ui-stroke-secondary)' },
           children: [jsx('img', { alt: '', src: views[name].url, onError: () => removeView(id, session.selected, name, views[name].url), style: { display: 'block', width: '100%', height: 48, objectFit: 'contain' } }), jsx('span', { style: { display: 'block', fontSize: 11, overflowWrap: 'anywhere' }, children: displayName(name) })],
         })) }),
-        names.length < candidate.total && jsx('p', { style: { fontSize: 12, color: 'var(--ui-text-secondary)' }, children: 'For remaining views, emit each returned MEDIA: line and open it in this chat. Failed images may need to be reopened.' }),
+        names.length < candidate.total && jsx('p', { style: { fontSize: 12, color: 'var(--ui-text-secondary)' }, children: 'Ask the assistant to show the remaining views in this chat. If a view failed to load, reopen its attachment.' }),
       ] }),
     ],
   })

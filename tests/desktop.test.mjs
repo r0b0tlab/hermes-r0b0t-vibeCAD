@@ -78,7 +78,7 @@ test('sheet exposes actual metadata and selectable available views only', async 
   iso.component.render(); front.component.render(); await tick()
   let pane = env.pane.render(), body = text(pane)
   assert.match(body, /bracket\.step/); assert.match(body, /STEP/); assert.match(body, /a{12}/)
-  assert.match(body, /2 of 3/); assert.match(body, /MEDIA:/)
+  assert.match(body, /2 of 3/); assert.match(body, /Ask the assistant to show the remaining views/)
   assert.deepEqual(paneNames(env), ['ISO', 'FRONT · DETAIL: CONTACT'])
   const button = walk(pane).find(node => node.type === 'button' && node.props['data-view'] === 'front_detail_contact')
   assert.equal(button.props.type, 'button'); button.props.onClick()
