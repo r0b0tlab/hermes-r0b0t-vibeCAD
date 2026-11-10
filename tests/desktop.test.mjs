@@ -22,6 +22,7 @@ async function setup({ media = true, nativeButtons = false } = {}) {
   let active
   const react = {
     useState(initial) { const state = active, i = state.index++; if (!(i in state.hooks)) state.hooks[i] = initial; return [state.hooks[i], value => { state.hooks[i] = typeof value === 'function' ? value(state.hooks[i]) : value }] },
+    useRef(initial) { const state = active, i = state.index++; if (!(i in state.hooks)) state.hooks[i] = { current: initial }; return state.hooks[i] },
     useEffect(fn, deps) { const state = active, i = state.index++; const old = state.effects[i]; if (!old || deps.some((value, j) => !Object.is(value, old.deps[j]))) state.scheduled.push(() => { old?.cleanup?.(); state.effects[i] = { deps, cleanup: fn() } }) },
   }
   const jsx = (type, props) => ({ type, props: props || {} })
@@ -118,6 +119,35 @@ test('zoom, view buttons and narrow-pane layout stay usable', async () => {
   walk(env.pane.render()).find(n => n.type === 'button' && text(n) === 'Zoom 2×').props.onClick()
   card(env, { id: 'two', result: { mesh_file: 'C:\\\\models\\\\part.stl' } }).component.render(); await tick()
   assert.equal(preview(env).props.style.width, '100%'); assert.match(text(env.pane.render()), /part\.stl/)
+})
+
+test('zoomed drawing pans by pointer drag and keyboard; fit mode does not drag', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('one'))
+  card(env).component.render(); await tick()
+  let pane = env.pane.render()
+  const findViewport = () => walk(env.pane.render()).find(n => n.props?.['data-pan-viewport'])
+  let viewport = findViewport()
+  const target = {
+    scrollLeft: 80, scrollTop: 60, setPointerCapture(id) { this.captured = id },
+    releasePointerCapture(id) { this.released = id }, hasPointerCapture(id) { return this.captured === id },
+  }
+  assert.equal(viewport.props.tabIndex, 0)
+  viewport.props.onPointerDown({ button: 0, pointerId: 3, clientX: 100, clientY: 90, currentTarget: target, preventDefault() {} })
+  assert.equal(target.captured, undefined)
+  walk(pane).find(n => n.type === 'button' && text(n) === 'Zoom 2×').props.onClick()
+  viewport = findViewport()
+  viewport.props.onPointerDown({ button: 0, pointerId: 3, clientX: 100, clientY: 90, currentTarget: target, preventDefault() {} })
+  assert.equal(target.captured, 3)
+  viewport.props.onPointerMove({ pointerId: 3, clientX: 70, clientY: 55, currentTarget: target })
+  assert.equal(target.scrollLeft, 110); assert.equal(target.scrollTop, 95)
+  viewport.props.onPointerUp({ pointerId: 3, currentTarget: target })
+  assert.equal(target.released, 3)
+  viewport.props.onPointerMove({ pointerId: 3, clientX: 0, clientY: 0, currentTarget: target })
+  assert.equal(target.scrollLeft, 110); assert.equal(target.scrollTop, 95)
+  let prevented = false
+  viewport.props.onKeyDown({ key: 'ArrowRight', currentTarget: target, preventDefault() { prevented = true } })
+  assert.equal(target.scrollLeft, 160); assert.equal(prevented, true)
+  assert.match(text(env.pane.render()), /drag.*arrow keys/i)
 })
 
 test('loading, failed media, missing metadata and stale callbacks remain honest', async () => {

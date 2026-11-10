@@ -1,5 +1,5 @@
 import * as sdk from '@hermes/plugin-sdk'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 // The media slot has no transcript position. Do not infer it from mount or URL
@@ -177,6 +177,8 @@ function DrawingPane() {
   const all = sdk.useValue(sheets)
   const [selection, setSelection] = useState(null)
   const [zoom, setZoom] = useState(null)
+  const pan = useRef(null)
+  const viewport = useRef(null)
   const id = stored || runtime
   useEffect(() => {
     if (id) rankSheets(id, runtime)
@@ -188,6 +190,13 @@ function DrawingPane() {
   const identity = JSON.stringify([id, session?.selected, candidate?.signature])
   const selected = selection?.identity === identity && names.includes(selection.name) ? selection.name : names[0]
   const zoomed = zoom?.identity === identity && zoom?.value === 2
+  useEffect(() => {
+    pan.current = null
+    if (viewport.current) {
+      viewport.current.scrollLeft = 0
+      viewport.current.scrollTop = 0
+    }
+  }, [identity, selected, zoomed])
   if (!names.length) {
     const loading = Object.values(views || {}).some(view => view.status === 'loading')
     const error = session?.historyError || Object.values(views || {}).some(view => view.status === 'error')
@@ -208,6 +217,32 @@ function DrawingPane() {
   const Button = sdk.Button || 'button'
   const buttonVariant = sdk.Button ? { variant: 'outline', size: 'sm' } : {}
   const buttonStyle = { border: '1px solid var(--ui-stroke-secondary)', borderRadius: 6, padding: 6, color: 'var(--ui-text-secondary)', background: 'transparent', cursor: 'pointer' }
+  const startPan = event => {
+    if (!zoomed || event.button !== 0 || pan.current) return
+    const node = event.currentTarget
+    pan.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: node.scrollLeft, top: node.scrollTop }
+    node.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+  const movePan = event => {
+    const origin = pan.current
+    if (!zoomed || !origin || origin.id !== event.pointerId) return
+    event.currentTarget.scrollLeft = origin.left - (event.clientX - origin.x)
+    event.currentTarget.scrollTop = origin.top - (event.clientY - origin.y)
+  }
+  const stopPan = event => {
+    if (pan.current?.id !== event.pointerId) return
+    pan.current = null
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+  const keyPan = event => {
+    if (!zoomed) return
+    const movement = { ArrowLeft: [-50, 0], ArrowRight: [50, 0], ArrowUp: [0, -50], ArrowDown: [0, 50] }[event.key]
+    if (!movement) return
+    event.currentTarget.scrollLeft += movement[0]
+    event.currentTarget.scrollTop += movement[1]
+    event.preventDefault()
+  }
   return jsxs('section', {
     'aria-label': 'Drawing sheet',
     style: { display: 'flex', flexDirection: 'column', gap: 10, padding: 12, minWidth: 0, overflow: 'auto' },
@@ -223,7 +258,15 @@ function DrawingPane() {
         jsx(Button, { ...buttonVariant, type: 'button', style: buttonStyle, 'aria-pressed': zoomed, onClick: () => setZoom({ identity, value: zoomed ? 1 : 2 }), children: zoomed ? 'Fit' : 'Zoom 2×' }),
       ] }),
       jsxs('figure', { style: { margin: 0, minWidth: 0 }, children: [
-        jsx('div', { style: { overflow: 'auto', maxWidth: '100%', maxHeight: '65vh', border: '1px solid var(--ui-stroke-secondary)' }, children: jsx('img', { 'data-preview': true, alt: `${displayName(selected).replace(' · ', ' ')} drawing`, src: views[selected].url, onError: () => removeView(id, session.selected, selected, views[selected].url), style: { display: 'block', width: zoomed ? '200%' : '100%', maxWidth: 'none', height: 'auto' } }) }),
+        jsx('div', {
+          ref: viewport, 'data-pan-viewport': true, tabIndex: 0, role: 'region',
+          'aria-label': zoomed ? 'Zoomed drawing: drag or use arrow keys to pan' : 'Drawing preview',
+          onPointerDown: startPan, onPointerMove: movePan, onPointerUp: stopPan,
+          onPointerCancel: stopPan, onLostPointerCapture: stopPan, onKeyDown: keyPan,
+          style: { overflow: 'auto', maxWidth: '100%', maxHeight: '65vh', border: '1px solid var(--ui-stroke-secondary)', cursor: zoomed ? 'grab' : 'default', touchAction: zoomed ? 'none' : 'auto' },
+          children: jsx('img', { 'data-preview': true, draggable: false, alt: `${displayName(selected).replace(' · ', ' ')} drawing`, src: views[selected].url, onError: () => removeView(id, session.selected, selected, views[selected].url), style: { display: 'block', width: zoomed ? '200%' : '100%', maxWidth: 'none', height: 'auto', userSelect: 'none' } }),
+        }),
+        zoomed && jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: 12, marginTop: 6 }, children: 'Drag the drawing or use arrow keys to pan.' }),
         jsxs('figcaption', { style: { color: 'var(--ui-text-secondary)', fontSize: 12, overflowWrap: 'anywhere', marginTop: 6 }, children: [
           actualView && `View: ${displayName(actualView)}. `,
           resolution && `Resolution: ${resolution} × ${resolution} px. `,
