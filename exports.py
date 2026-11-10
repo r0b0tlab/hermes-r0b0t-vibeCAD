@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -295,13 +296,28 @@ def _publication_lock(exports_dir: Path):
             if not handle.tell():
                 handle.write(b"0")
                 handle.flush()
-            handle.seek(0)
-            # LK_LOCK retries internally, then fails rather than hanging forever.
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
         else:
             import fcntl
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        # The host may clear its thread-scoped interrupt after abandoning a
+        # worker. Never sit in a blocking lock call throughout that window.
+        while True:
+            _check_cancelled()
+            try:
+                if os.name == "nt":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                contention = (errno.EACCES, errno.EAGAIN)
+                if os.name == "nt":
+                    contention += (errno.EDEADLK,)
+                if exc.errno not in contention:
+                    raise
+                time.sleep(0.1)
         try:
+            _check_cancelled()
             yield
         finally:
             if os.name == "nt":
