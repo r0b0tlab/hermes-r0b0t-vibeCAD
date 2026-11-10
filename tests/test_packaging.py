@@ -43,12 +43,18 @@ from pathlib import Path
 import hermes_r0b0t_vibecad as package
 from hermes_r0b0t_vibecad.profiles import load_profile_catalog
 from hermes_r0b0t_vibecad.scripts import bootstrap
+from hermes_r0b0t_vibecad.config import Settings
+from hermes_r0b0t_vibecad.exports import run_cad
+import sys
 root = Path(package.__file__).parent
 assert root.is_relative_to(Path(__import__("sys").prefix))
 assert "generic-fdm-220" in load_profile_catalog()
 for item in ("profiles/bambu-adapters.json", "profiles/printer-profile.schema.json", "desktop/plugin.js", "skills/fdm-handoff/SKILL.md", "plugin.yaml"):
     assert (root / item).is_file(), item
 assert callable(bootstrap.main)
+settings = Settings(Path.cwd(), Path(sys.executable), "generic-fdm-220", None, 5)
+completed = run_cad(settings, [sys.executable, "-c", "print('wheel-cad')"], cwd=Path.cwd())
+assert completed.returncode == 0 and completed.stdout.strip() == "wheel-cad"
 '''
     subprocess.run([str(python), "-I", "-c", code], check=True, cwd=tmp_path)
     subprocess.run([str(python), "-I", "-m", f"{PACKAGE}.scripts.init_printer_profile", "--help"], check=True, cwd=tmp_path)

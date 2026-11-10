@@ -47,6 +47,7 @@ only-include = ["hermes_r0b0t_vibecad"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "__init__.py" = "hermes_r0b0t_vibecad/__init__.py"
+"_cad_supervisor.py" = "hermes_r0b0t_vibecad/_cad_supervisor.py"
 "adapters.py" = "hermes_r0b0t_vibecad/adapters.py"
 "bambu.py" = "hermes_r0b0t_vibecad/bambu.py"
 "config.py" = "hermes_r0b0t_vibecad/config.py"

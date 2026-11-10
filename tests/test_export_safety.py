@@ -263,7 +263,7 @@ sys.exit(7 if outcome == "failure" else 0)
     control = subprocess.Popen([sys.executable, "-c", child_code, str(tmp_path), "control"],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if outcome == "cancel":
-        real_waitid = os.waitid
+        real_select = exports._wait_readable
         cancelled = False
         def interrupt_wait(*args):
             nonlocal cancelled
@@ -274,8 +274,8 @@ sys.exit(7 if outcome == "failure" else 0)
                     time.sleep(.005)
                 cancelled = True
                 raise KeyboardInterrupt("injected cancellation")
-            return real_waitid(*args)
-        monkeypatch.setattr(os, "waitid", interrupt_wait)
+            return real_select(*args)
+        monkeypatch.setattr(exports, "_wait_readable", interrupt_wait)
     try:
         argv = [sys.executable, "-c", parent_code, str(tmp_path), outcome, child_code]
         if outcome == "timeout":
@@ -310,38 +310,10 @@ sys.exit(7 if outcome == "failure" else 0)
         control.wait(timeout=5)
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX waitid required")
-def test_reaped_leader_is_never_signaled_by_numeric_group_id(tmp_path, monkeypatch):
-    real_waitid = os.waitid
-    real_killpg = os.killpg
-    stolen = False
-    signals = []
-    def reaping_waitid(*args):
-        nonlocal stolen
-        result = real_waitid(*args)
-        if result is not None and not stolen:
-            os.waitpid(args[1], 0)  # Simulate an external SIGCHLD reaper.
-            stolen = True
-        return result
-    def record_killpg(pgid, sig):
-        signals.append((pgid, sig))
-        return real_killpg(pgid, sig)
-    monkeypatch.setattr(os, "waitid", reaping_waitid)
-    monkeypatch.setattr(os, "killpg", record_killpg)
-    with pytest.raises(exports.ExportError, match="lost ownership.*not signaled"):
-        exports.run_cad(settings(tmp_path), [sys.executable, "-c", "pass"], cwd=tmp_path)
-    assert stolen
-    assert not signals
-
-
-@pytest.mark.skipif(os.name != "posix", reason="POSIX waitid required")
-def test_group_signal_precedes_leader_reap(tmp_path, monkeypatch):
-    real_killpg = os.killpg
-    observed = []
-    def check_leader(pgid, sig):
-        observed.append(os.waitid(os.P_PID, pgid, os.WEXITED | os.WNOHANG | os.WNOWAIT))
-        return real_killpg(pgid, sig)
-    monkeypatch.setattr(os, "killpg", check_leader)
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups required")
+def test_host_never_signals_a_numeric_process_group(tmp_path, monkeypatch):
+    def forbidden(*args):
+        pytest.fail("host must not signal a numeric process group")
+    monkeypatch.setattr(os, "killpg", forbidden)
     result = exports.run_cad(settings(tmp_path), [sys.executable, "-c", "pass"], cwd=tmp_path)
     assert result.returncode == 0
-    assert len(observed) == 1 and observed[0] is not None

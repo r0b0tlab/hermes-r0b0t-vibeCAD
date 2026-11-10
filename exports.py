@@ -6,8 +6,8 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -34,12 +34,20 @@ def bounded(text: str | None, limit: int = MAX_TOOL_TEXT) -> str:
     return value if len(value) <= limit else value[: limit // 2] + "\n… [truncated] …\n" + value[-limit // 2 :]
 
 
+def _wait_readable(fd: int, timeout: float) -> bool:
+    # Avoid select(2)'s FD_SETSIZE limit in long-lived Hermes processes.
+    with selectors.DefaultSelector() as selector:
+        selector.register(fd, selectors.EVENT_READ)
+        return bool(selector.select(timeout))
+
+
 def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapping[str, str] | None = None, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[str]:
     """Run CAD and clean up its owned process group where POSIX permits it.
 
     This is not a sandbox: descendants can leave the group or become
     unsignalable. Windows cleanup covers only the direct child, not its tree.
-    Other code must not reap this invocation's child concurrently.
+    POSIX uses an isolated supervisor so host-wide child reapers cannot steal
+    the CAD group anchor or its exit status.
     """
     # Do not pass provider credentials, Python injection settings or inherited
     # VIBECAD_* values to the CAD child. This is not a filesystem sandbox.
@@ -73,18 +81,29 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
             value = value[:half] + b"\n... [capture truncated] ...\n" + value[-half:]
         return value.decode("utf-8", errors="replace")
 
-    # POSIX waitid(WNOWAIT) lets us observe exit without reaping the session
-    # leader. Its reserved PID pins the process-group ID until after killpg;
-    # wait()/poll() before killpg could signal an unrelated, reused group.
-    if os.name == "posix" and not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")):
-        raise ExportError("CAD process-group cleanup requires POSIX waitid with WNOWAIT")
+    control_read = control_write = report_read = report_write = None
     try:
-        process = subprocess.Popen(argv, cwd=str(cwd), env=environment, stdin=subprocess.PIPE if input_bytes is not None else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=(os.name == "posix"))
+        if os.name == "posix":
+            control_read, control_write = os.pipe()
+            report_read, report_write = os.pipe()
+            helper = str(Path(__file__).with_name("_cad_supervisor.py"))
+            command = [sys.executable, helper, "supervise", str(control_read), str(report_write), str(settings.timeout_s), *argv]
+            process = subprocess.Popen(command, cwd=str(cwd), env=environment, stdin=subprocess.PIPE if input_bytes is not None else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(control_read, report_write))
+        else:
+            process = subprocess.Popen(argv, cwd=str(cwd), env=environment, stdin=subprocess.PIPE if input_bytes is not None else None, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as exc:
+        for fd in (control_read, control_write, report_read, report_write):
+            if fd is not None:
+                os.close(fd)
         raise ExportError(f"could not start CAD subprocess: {exc}") from exc
+    if os.name == "posix":
+        os.close(control_read)
+        os.close(report_write)
     threads = []
     writer = None
     timed_out = False
+    returncode = None
+    reported = False
     try:
         for index, pipe in enumerate((process.stdout, process.stderr)):
             thread = threading.Thread(target=drain, args=(pipe, index), daemon=True)
@@ -102,56 +121,61 @@ def run_cad(settings: Settings, argv: list[str], *, cwd: Path, env_updates: Mapp
             writer = threading.Thread(target=feed_snapshot, daemon=True)
             writer.start()
         if os.name == "posix":
-            deadline = time.monotonic() + settings.timeout_s
-            while os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    timed_out = True
-                    break
-                time.sleep(min(remaining, .02))
+            # The helper reports only after it has waited for its anchor's
+            # SIGKILL. This dedicated pipe is independent of host waitpid.
+            ready = _wait_readable(report_read, settings.timeout_s + 10)
+            if not ready:
+                raise ExportError("CAD supervision did not report cleanup")
+            raw = os.read(report_read, 65536)
+            reported = True
+            try:
+                result = json.loads(raw)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise ExportError("CAD supervisor exited without a valid cleanup report") from exc
+            if result.get("error"):
+                raise ExportError(result["error"])
+            timed_out = bool(result.get("timeout"))
+            if not timed_out:
+                returncode = result.get("returncode")
+                if not isinstance(returncode, int):
+                    raise ExportError("CAD supervisor returned no process status")
         else:
             try:
-                process.wait(timeout=settings.timeout_s)
+                returncode = process.wait(timeout=settings.timeout_s)
             except subprocess.TimeoutExpired:
                 timed_out = True
     finally:
+        if os.name == "posix":
+            # EOF requests cleanup even if the calling thread is cancelled or
+            # the host exits. Never signal the helper by a recyclable PID.
+            os.close(control_write)
+            if not reported:
+                ready = _wait_readable(report_read, 5)
+                if not ready:
+                    os.close(report_read)
+                    raise ExportError("CAD supervisor did not confirm cleanup")
+                try:
+                    cleanup = json.loads(os.read(report_read, 65536))
+                    if cleanup.get("error"):
+                        raise ExportError(cleanup["error"])
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise ExportError("CAD supervisor did not confirm cleanup") from exc
+            os.close(report_read)
+        elif process.poll() is None:
+            process.kill()
         try:
-            if os.name == "posix":
-                # An outside SIGCHLD handler/reaper can steal our child. Never
-                # signal the numeric group ID if its leader is no longer ours.
-                try:
-                    leader_exit = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-                except ChildProcessError as exc:
-                    raise ExportError("lost ownership of CAD subprocess; group not signaled") from exc
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                except PermissionError:
-                    # Darwin reports EPERM for a group containing only the
-                    # unreaped zombie leader. It can also mean no member is
-                    # signalable, so this is not a containment guarantee.
-                    if sys.platform != "darwin" or leader_exit is None:
-                        raise
-            elif process.poll() is None:
-                # Windows has no job-object supervision here: direct child only.
-                process.kill()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired as exc:
+            raise ExportError("CAD supervisor did not exit after cleanup request") from exc
         finally:
-            # A concurrent foreign reaper can still race the ownership check;
-            # callers must not reap this invocation's child in another thread.
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired as exc:
-                raise ExportError("CAD subprocess did not exit after cleanup") from exc
-            finally:
-                for thread in threads:
-                    thread.join(timeout=1)
-                if writer is not None:
-                    writer.join(timeout=1)
+            for thread in threads:
+                thread.join(timeout=1)
+            if writer is not None:
+                writer.join(timeout=1)
     stdout, stderr = captured(0), captured(1)
     if timed_out:
         raise ExportError(f"CAD subprocess exceeded {settings.timeout_s}s\nstdout:\n{bounded(stdout)}\nstderr:\n{bounded(stderr)}")
-    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
 
 def decode_json(completed: subprocess.CompletedProcess[str], operation: str) -> dict[str, Any]:
