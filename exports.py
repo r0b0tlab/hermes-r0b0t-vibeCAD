@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import ConfigError, Settings, cad_python, ensure_workspace, project_dirs, project_root_for, resolve_profile, resolve_workspace_file, safe_output_stem
-from .geometry import GeometryError, METRICS_PROGRAM, fit_to_profile, nozzle_warnings
+from .geometry import GeometryError, METRICS_PROGRAM, fit_to_profile, nozzle_warnings, overlapping_solids
 
 
 MAX_TOOL_TEXT = 12000
@@ -267,6 +267,9 @@ def execute_and_export(settings: Settings, args: Mapping[str, Any]) -> dict[str,
             raise ExportError("STEP contains no solids")
         if not bed_fit["fits"]:
             raise ExportError(f"model does not fit printer profile {profile.id}: {bed_fit['failures']}")
+        overlaps = overlapping_solids(metrics)
+        if overlaps:
+            raise ExportError(f"STEP solids overlap in volume: {overlaps}")
         meshed = decode_json(run_cad(settings, [str(cad_python(settings)), "-c", MESH_EXPORT_PROGRAM], cwd=project, env_updates={"VIBECAD_STEP_FILE": str(staged_step), "VIBECAD_STL_FILE": str(staged_stl), "VIBECAD_3MF_FILE": str(staged_3mf)}), "mesh export")
         if not all(path.is_file() and path.stat().st_size > 0 for path in staged):
             raise ExportError("validated build did not produce every staged artifact")
@@ -302,7 +305,11 @@ def inspect_metrics(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
         profile = resolve_profile(settings, args)
         metrics = inspect_step(step_file, settings)
         bed_fit = fit_to_profile(metrics, profile)
-        valid = bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0 and bed_fit["fits"]
-        return {"success": valid, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": nozzle_warnings(metrics, profile), "printer_validation": "passed" if valid else "failed"}
+        overlaps = overlapping_solids(metrics)
+        valid = bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0 and bed_fit["fits"] and not overlaps
+        result = {"success": valid, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": nozzle_warnings(metrics, profile), "printer_validation": "passed" if valid else "failed"}
+        if overlaps:
+            result["error"] = f"STEP solids overlap in volume: {overlaps}"
+        return result
     except (ConfigError, GeometryError, ExportError) as exc:
         return {"success": False, "error": str(exc), "printer_validation": "failed"}

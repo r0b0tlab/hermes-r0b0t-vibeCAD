@@ -26,6 +26,12 @@ def _number(mapping: Mapping[str, Any], key: str, context: str) -> float:
     return value
 
 
+def overlapping_solids(metrics: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return STEP solid pairs exceeding the shared volume tolerance in mm³."""
+    return [entry for entry in metrics.get("intersections", [])
+            if float(entry.get("overlap_volume_mm3", 0)) > 1e-6]
+
+
 def fit_to_profile(metrics: Mapping[str, Any], profile: PrinterProfile) -> dict[str, Any]:
     """Conservatively fit a rectangular FDM part into a rectangular profile."""
     bbox = metrics.get("bbox")

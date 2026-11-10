@@ -13,7 +13,7 @@ from typing import Any, Mapping
 
 from .config import ConfigError, Settings, cad_python, ensure_workspace, project_dirs, project_root_for, resolve_profile, resolve_workspace_file
 from .exports import ExportError, atomic_json, decode_json, inspect_step, run_cad, sha256
-from .geometry import GeometryError, fit_to_profile
+from .geometry import GeometryError, fit_to_profile, overlapping_solids
 
 
 class HandoffError(ValueError):
@@ -135,7 +135,7 @@ def stage_for_slicer(settings: Settings, args: Mapping[str, Any], *, physical_vo
             physical_fit = fit_to_profile(metrics, replace(profile, bed=bed))
             if not physical_fit["fits"]:
                 raise HandoffError(f"model does not fit adapter physical envelope: {physical_fit['failures']}")
-        overlaps = [entry for entry in metrics.get("intersections", []) if float(entry.get("overlap_volume_mm3", 0)) > 1e-6]
+        overlaps = overlapping_solids(metrics)
         if overlaps:
             raise HandoffError(f"STEP solids overlap in volume: {overlaps}")
         parts = _normalize_map(args.get("solids_map"), solids=solids, tool_count=min(profile.tool_count, physical_tools) if physical_tools else profile.tool_count)

@@ -75,6 +75,60 @@ def test_inspection_sums_disconnected_overlap_regions(tmp_path: Path) -> None:
     assert inspected["metrics"]["intersections"][0]["overlap_volume_mm3"] == pytest.approx(4.0)
 
 
+def _two_box_model(distance: float) -> str:
+    return f'''\
+import os
+from build123d import Align, Box, Compound, Pos, export_step
+left = Box(10, 10, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+right = Pos({distance}, 0, 0) * Box(10, 10, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+export_step(Compound(children=[left, right]), os.environ["VIBECAD_OUTPUT_STEP"])
+'''
+
+
+def test_overlap_tolerance_is_shared_and_strict() -> None:
+    from vibecad_public_plugin.geometry import overlapping_solids
+
+    pairs = [{"overlap_volume_mm3": volume} for volume in (0.0, 1e-6, 1.0001e-6)]
+    assert overlapping_solids({"intersections": pairs}) == [pairs[2]]
+
+
+def test_inspect_rejects_bed_aligned_overlapping_solids(tmp_path: Path) -> None:
+    from build123d import Align, Box, Compound, Pos, export_step
+
+    box = Box(10, 10, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    step = tmp_path / "overlap.step"
+    export_step(Compound(children=[box, Pos(5, 0, 0) * box]), step)
+    result = inspect_metrics(make_settings(tmp_path), {"step_file": str(step)})
+    assert result["success"] is False, result
+    assert result["printer_validation"] == "failed"
+    assert result["metrics"]["intersections"][0]["overlap_volume_mm3"] == pytest.approx(500)
+    assert "overlap" in result["error"].lower()
+
+
+def test_export_rejects_overlap_preserves_touching_export(tmp_path: Path) -> None:
+    workspace = tmp_path / "projects"
+    source = workspace / "demo" / "source"
+    source.mkdir(parents=True)
+    model = source / "model.py"
+    model.write_text(_two_box_model(10), encoding="utf-8")
+    settings = make_settings(workspace)
+    request = {"script_path": str(model), "output_name": "demo"}
+    first = execute_and_export(settings, request)
+    assert first["success"] is True, first
+    assert first["printer_validation"] == "passed"
+    inspected = inspect_metrics(settings, {"step_file": first["output"]["step"]})
+    assert inspected["success"] is True, inspected
+    assert inspected["metrics"]["intersections"][0]["overlap_volume_mm3"] == pytest.approx(0)
+    before = {path: Path(path).read_bytes() for path in first["output"].values()}
+
+    model.write_text(_two_box_model(5), encoding="utf-8")
+    result = execute_and_export(settings, request)
+    assert result["success"] is False, result
+    assert result["printer_validation"] == "failed"
+    assert "overlap" in result["error"].lower()
+    assert {path: Path(path).read_bytes() for path in before} == before
+
+
 def test_export_rejects_output_directory_symlink_before_running_model(tmp_path: Path) -> None:
     workspace = tmp_path / "projects"
     source = workspace / "demo" / "source"
