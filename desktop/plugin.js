@@ -7,7 +7,32 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 const sheets = sdk.atom({})
 const pending = new Map()
 const TOOL = 'vibecad_generate_preview_renders'
+const BRIDGE = 'tool_call'
 const VIEW_ORDER = ['iso', 'top', 'front', 'back', 'right', 'bottom']
+
+// A deferred tool call is stored as the "tool_call" bridge: the row's own name
+// is the bridge, and the tool that actually ran is named in args.calls[0].
+// Upstream unwraps this the same way when it hands a tool call to a renderer
+// (effectiveToolCall), so the pane must unwrap it too or it never sees its own
+// tool. A batch of several calls stays the bridge: no plugin owns it.
+function ranTool(row) {
+  const name = row?.name
+  if (name !== BRIDGE) return name
+  const args = row?.args
+  if (!args || typeof args !== 'object') return name
+  let calls = args.calls
+  if (calls === undefined || calls === null) {
+    calls = typeof args.name === 'string' && args.name.trim() ? [{ arguments: args.arguments, name: args.name }] : null
+  }
+  if (typeof calls === 'string') {
+    try { calls = JSON.parse(calls) } catch { return name }
+  }
+  if (calls && typeof calls === 'object' && !Array.isArray(calls)) calls = [calls]
+  if (!Array.isArray(calls) || calls.length !== 1) return name
+  const entry = calls[0]
+  const inner = typeof entry?.name === 'string' ? entry.name.trim() : ''
+  return inner && inner !== BRIDGE ? inner : name
+}
 
 function asObject(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value
@@ -52,7 +77,7 @@ async function rankSheets(sessionId, runtimeId) {
     const response = await sdk.host.request('session.history', { session_id: runtimeId || sessionId })
     if (pending.get(sessionId) !== ticket) return
     if (!Array.isArray(response?.messages)) throw new Error('Invalid session history')
-    const rows = response.messages.filter(row => row?.role === 'tool' && row.name === TOOL && typeof row.tool_call_id === 'string' && row.tool_call_id)
+    const rows = response.messages.filter(row => row?.role === 'tool' && ranTool(row) === TOOL && typeof row.tool_call_id === 'string' && row.tool_call_id)
     const counts = new Map()
     for (const row of rows) counts.set(row.tool_call_id, (counts.get(row.tool_call_id) || 0) + 1)
     setSession(sessionId, state => {

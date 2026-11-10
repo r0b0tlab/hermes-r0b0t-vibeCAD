@@ -5,7 +5,7 @@ author: "r0b0t / Hermes Agent"
 license: MIT
 manifest_version: 2
 api_version: 1
-requires_hermes: ">=0.21.0"
+requires_hermes: ">=0.21.6"
 tags: [cad, build123d, 3d-printing, fdm, slicer]
 provides_hooks:
   - pre_tool_call

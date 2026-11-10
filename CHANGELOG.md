@@ -12,6 +12,8 @@
 - Use immutable preview paths, preserve assembly colors where available, refuse source changes during rendering, and scope the Desktop pane to the focused chat and observed result.
 - Add an importable wheel, tested bootstrap, explicit external CAD-runtime declaration, two-part demo, real CAD integration tests and a JavaScript Desktop harness.
 - Serialize cooperating export writers and roll back ordinary publication failures; stable-path exports remain neither reader-atomic nor crash-atomic.
+- Match the Desktop pane's own preview tool when the gateway stores a deferred call under the `tool_call` bridge, so the pane recognises its own sheet instead of reporting none; a batch that ran several tools is not claimed.
+- Require the same Hermes floor as the catalog entry (`>=0.21.6`), so the installed manifest and the catalog declare one compatibility floor.
 
 ## 0.3.0
 

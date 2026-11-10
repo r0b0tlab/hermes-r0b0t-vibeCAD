@@ -49,6 +49,15 @@ async function setup({ media = true } = {}) {
   return { sdk, pane, mount, registrations, mediaContribution, history, requests, setRequest: fn => { request = fn }, stored: focusedStoredSessionId, runtime: focusedSessionId }
 }
 const rows = (...ids) => ids.map(tool_call_id => ({ role: 'tool', name: 'vibecad_generate_preview_renders', tool_call_id }))
+// A deferred tool call is stored as the bridge: the row's own name is
+// "tool_call" and the real tool name sits in args.calls[0].name. This is the
+// shape upstream's session.history projection actually produces.
+const bridged = (...ids) => ids.map(tool_call_id => ({
+  role: 'tool',
+  name: 'tool_call',
+  tool_call_id,
+  args: { calls: [{ name: 'vibecad_generate_preview_renders', arguments: { resolution: '800' } }] },
+}))
 const card = (env, { session = 'a', id = 'one', view = 'iso', renders, resolver, fallback = 'BUILTIN' } = {}) => {
   const path = renders?.[view] || `/${id}/${view}.png`
   const file = { path, name: `preview_${view}.png`, kind: 'image', resolveUrl: resolver || (() => Promise.resolve(`url:${path}`)) }
@@ -155,4 +164,27 @@ test('empty or invalid URLs retain the built-in player and invalid history clear
   env.setRequest(async () => ({}))
   const empty = card(env, { id: 'two', resolver: async () => '' }); empty.component.render(); await tick()
   assert.equal(empty.component.render(), 'BUILTIN'); assert.deepEqual(paneNames(env), [])
+})
+
+test('a deferred (bridged) tool row is recognised as the tool it ran', async () => {
+  // Every deferred invocation is stored as the "tool_call" bridge, so a pane
+  // that matches on the row's own name never sees the tool it drew.
+  const env = await setup(); env.stored.set('a'); env.history.set('a', bridged('one'))
+  const c = card(env, { id: 'one' }); c.component.render(); await tick()
+  assert.deepEqual(paneNames(env), ['ISO'])
+})
+
+test('a bridge that ran another tool is not claimed, and a batch is not split', async () => {
+  const env = await setup(); env.stored.set('a')
+  env.history.set('a', [{ role: 'tool', name: 'tool_call', tool_call_id: 'other', args: { calls: [{ name: 'terminal', arguments: {} }] } }])
+  const c = card(env, { id: 'one' }); c.component.render(); await tick()
+  assert.deepEqual(paneNames(env), [])
+  // A multi-entry batch belongs to the bridge, not to this plugin: no single
+  // entry may be claimed, or the pane would show a sheet it cannot attribute.
+  env.history.set('a', [{ role: 'tool', name: 'tool_call', tool_call_id: 'batch', args: { calls: [
+    { name: 'vibecad_generate_preview_renders', arguments: {} },
+    { name: 'terminal', arguments: {} },
+  ] } }])
+  env.pane.render(); await tick()
+  assert.deepEqual(paneNames(env), [])
 })
