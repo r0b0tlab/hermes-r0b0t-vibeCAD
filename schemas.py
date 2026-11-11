@@ -52,7 +52,7 @@ VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
         "properties": {
             "step_file": {"type": "string", "description": "Absolute or workspace-relative STEP/STP file path. Supply exactly one of step_file or mesh_file."},
             "mesh_file": {"type": "string", "description": "Absolute or workspace-relative STL file path. Supply exactly one of mesh_file or step_file."},
-            "views": {"type": "array", "minItems": 1, "description": "Orthographic views. Front looks from -Y with +X right; back looks from +Y with -X right. Default remains iso, top, bottom, front, right.", "items": {"type": "string", "enum": ["iso", "top", "bottom", "front", "back", "right"]}},
+            "views": {"type": "array", "minItems": 1, "description": "Orthographic views. Front looks from -Y with +X right; back looks from +Y with -X right; left looks from -X with -Y right; right looks from +X with +Y right. Default remains iso, top, bottom, front, right.", "items": {"type": "string", "enum": ["iso", "top", "bottom", "front", "back", "left", "right"]}},
             "region": {
                 "type": "object",
                 "description": "Optional detail viewport in normalized coordinates of each selected view's ordinary 800x800 full-frame preview, including its padding: (0,0) top-left, (1,1) bottom-right. Each extent must be >=0.001; rectangular selections are centered and letterboxed. Choose one view per call when regions differ.",

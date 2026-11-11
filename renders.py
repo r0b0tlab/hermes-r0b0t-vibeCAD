@@ -115,6 +115,7 @@ def projection(name):
     if name == "front": return np.column_stack((x, z)), -y
     if name == "back": return np.column_stack((-x, z)), y
     if name == "right": return np.column_stack((y, z)), x
+    if name == "left": return np.column_stack((-y, z)), -x
     elevation = math.radians(30)
     screen_x = (x - y) / math.sqrt(2)
     screen_y = (x + y) * math.sin(elevation) / math.sqrt(2) + z * math.cos(elevation)
@@ -238,9 +239,22 @@ def render(name, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(pixels, mode="RGB").save(output)
 
+mins_mm = vertices.min(axis=0)
+maxs_mm = vertices.max(axis=0)
+span_mm = maxs_mm - mins_mm
+geometry_summary = {
+    "bbox_size_mm": {
+        "x": round(float(span_mm[0]), 4),
+        "y": round(float(span_mm[1]), 4),
+        "z": round(float(span_mm[2]), 4),
+    },
+    "z_min_mm": round(float(mins_mm[2]), 4),
+    "part_count": int(len(parts)),
+    "triangle_count": int(len(faces)),
+}
 for name, output in outputs.items():
     render(render_views.get(name, name), output)
-print(json.dumps({"outputs": {name: str(path) for name, path in outputs.items()}}, sort_keys=True))
+print(json.dumps({"outputs": {name: str(path) for name, path in outputs.items()}, "geometry_summary": geometry_summary}, sort_keys=True))
 '''
 
 
@@ -263,7 +277,7 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
                 requested = [part.strip() for part in stripped.split(",") if part.strip()]
         if not isinstance(requested, list) or not requested:
             raise RenderError("views must be a non-empty array")
-        allowed = {"iso", "top", "bottom", "front", "back", "right"}
+        allowed = {"iso", "top", "bottom", "front", "back", "left", "right"}
         views: list[str] = []
         for raw in requested:
             view = str(raw).lower().strip()
@@ -322,6 +336,8 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
                   "render_sha256": render_hashes,
                   "render_metadata": {name: {"view": view, "region": region, "resolution": resolution} for name, view in named_views.items()},
                   "media": [f"MEDIA:{path}" for path in outputs.values()]}
+        if isinstance(rendered.get("geometry_summary"), dict):
+            result["geometry_summary"] = rendered["geometry_summary"]
         if has_step:
             result.update({"step_file": str(step_file), "source_step_sha256": source_hash})
         else:

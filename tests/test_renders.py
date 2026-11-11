@@ -298,3 +298,33 @@ def test_stringified_views_transport_tolerance_and_rejection(tmp_path: Path) -> 
     for bad in ("", "   ", "[invalid", 123):
         rejected = generate_preview_renders(settings, {"step_file": str(path), "views": bad})
         assert not rejected["success"] and "views" in rejected["error"]
+
+
+def test_left_view_orientation_and_geometry_summary(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    # Looking from -X toward +X ("left"): -Y is to the viewer's right, +Y is to the viewer's left.
+    neg_y = colored_box((4, 4, 6), (0, -10, 0), "red")
+    pos_y = colored_box((4, 4, 6), (0, 10, 0), "blue")
+    path = tmp_path / "sides.step"
+    export_step(Compound(children=[neg_y, pos_y]), path)
+
+    result = generate_preview_renders(settings, {"step_file": str(path), "views": ["left", "right"]})
+    assert result["success"] is True, result
+
+    left_img = image(result["renders"]["left"])
+    right_img = image(result["renders"]["right"])
+    left_red_x = np.where((left_img[:, :, 0] > 100) & (left_img[:, :, 2] == 0))[1].mean()
+    left_blue_x = np.where((left_img[:, :, 2] > 100) & (left_img[:, :, 0] == 0))[1].mean()
+    right_red_x = np.where((right_img[:, :, 0] > 100) & (right_img[:, :, 2] == 0))[1].mean()
+    right_blue_x = np.where((right_img[:, :, 2] > 100) & (right_img[:, :, 0] == 0))[1].mean()
+    # In right (+X) view, +Y is right (blue_x > red_x); in left (-X) view, -Y is right (red_x > blue_x).
+    assert right_blue_x > right_red_x
+    assert left_red_x > left_blue_x
+
+    summary = result["geometry_summary"]
+    assert summary["part_count"] == 2
+    assert summary["triangle_count"] >= 24
+    assert summary["z_min_mm"] == pytest.approx(0.0, abs=1e-3)
+    assert summary["bbox_size_mm"]["x"] == pytest.approx(4.0, abs=0.1)
+    assert summary["bbox_size_mm"]["y"] == pytest.approx(24.0, abs=0.1)
+    assert summary["bbox_size_mm"]["z"] == pytest.approx(6.0, abs=0.1)
