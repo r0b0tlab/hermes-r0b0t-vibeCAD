@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import math
 import os
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -64,9 +65,12 @@ def modify_parameter(settings: Settings, args: Mapping[str, Any]) -> dict[str, A
         end = _offset(lines, target.end_lineno, target.end_col_offset)
         updated = (source_bytes[:start] + repr(new_value).encode("utf-8") + source_bytes[end:]).decode("utf-8")
         ast.parse(updated, filename=str(script))
-        temporary = script.with_name(f".{script.name}.{os.getpid()}.tmp")
-        temporary.write_bytes(updated.encode("utf-8"))
-        os.replace(temporary, script)
+        temporary = script.with_name(f".{script.name}.{os.getpid()}.{time.time_ns()}.tmp")
+        try:
+            temporary.write_bytes(updated.encode("utf-8"))
+            os.replace(temporary, script)
+        finally:
+            temporary.unlink(missing_ok=True)
         return {"success": True, "script_path": str(script), "param_name": name, "old_value": old_value, "new_value": new_value, "changed_bytes": [start, end], "next_step": "Run vibecad_execute_and_export before relying on this edit."}
-    except (ConfigError, SyntaxError, TypeError, ValueError) as exc:
+    except (ConfigError, SyntaxError, TypeError, ValueError, OSError) as exc:
         return {"success": False, "error": str(exc)}

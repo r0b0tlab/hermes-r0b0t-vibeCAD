@@ -60,3 +60,25 @@ def test_bootstrap_rejects_missing_interpreter(tmp_path: Path, monkeypatch) -> N
     with pytest.raises(SystemExit, match="unavailable"):
         bootstrap.main()
     assert not (tmp_path / "cad").exists()
+
+
+def test_bootstrap_verifies_cad_imports_with_sanitized_env(tmp_path: Path, monkeypatch) -> None:
+    creator = tmp_path / "python3.12"
+    creator.touch()
+    monkeypatch.setenv("PYTHONPATH", "/polluted/host/site-packages")
+    monkeypatch.setattr(bootstrap, "parse_args", lambda: argparse.Namespace(venv=str(tmp_path / "cad"), python="python3.12"))
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda _: str(creator))
+    seen = []
+
+    def run(command, **kwargs):
+        seen.append((command, kwargs.get("env")))
+        if len(seen) == 4:
+            return subprocess.CompletedProcess(command, 1)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    with pytest.raises(SystemExit, match="CAD dependency verification failed"):
+        bootstrap.main()
+    assert len(seen) == 4
+    assert "import build123d" in seen[3][0][2]
+    assert seen[2][1] is not None and "PYTHONPATH" not in seen[2][1]

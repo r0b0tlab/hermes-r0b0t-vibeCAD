@@ -67,3 +67,19 @@ def test_modify_parameter_preserves_crlf_and_reports_original_byte_offsets(tmp_p
     assert model.read_bytes() == original.replace(b"42", b"45.0")
     start, end = result["changed_bytes"]
     assert original[start:end] == b"42"
+
+
+def test_modify_parameter_catches_oserror_and_cleans_temporary(tmp_path: Path, monkeypatch) -> None:
+    from vibecad_public_plugin import parameters
+
+    model = tmp_path / "model.py"
+    model.write_text('PARAMS = {"length": 42.0}\n', encoding="utf-8")
+
+    def fail_replace(_src, _dst):
+        raise PermissionError("read-only target")
+
+    monkeypatch.setattr(parameters.os, "replace", fail_replace)
+    result = modify_parameter(settings(tmp_path), {"script_path": str(model), "param_name": "length", "new_val": 50.0})
+    assert result["success"] is False
+    assert "read-only target" in result["error"]
+    assert not list(tmp_path.glob(".*.tmp"))

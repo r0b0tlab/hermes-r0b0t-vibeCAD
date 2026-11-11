@@ -142,3 +142,15 @@ def test_export_rejects_output_directory_symlink_before_running_model(tmp_path: 
     assert result["success"] is False
     assert "output directory" in result["error"]
     assert list(outside.iterdir()) == []
+
+
+def test_inspect_metrics_reports_actionable_error_on_bed_or_datum_failure(tmp_path: Path) -> None:
+    from build123d import Box, export_step
+
+    floating = tmp_path / "floating.step"
+    # Centered Box(10, 10, 10) sits at z_min = -5.0 mm (violates Z=0 bed datum).
+    export_step(Box(10, 10, 10), floating)
+    result = inspect_metrics(make_settings(tmp_path), {"step_file": str(floating)})
+    assert result["success"] is False
+    assert result["printer_validation"] == "failed"
+    assert "z_datum" in result.get("error", "")

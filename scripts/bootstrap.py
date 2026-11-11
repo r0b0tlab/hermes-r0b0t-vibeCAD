@@ -41,9 +41,18 @@ def main() -> int:
     )
     if version_check.returncode:
         raise SystemExit(f"CAD Python must be 3.12 or 3.13: {creator}")
-    subprocess.run([str(creator), "-m", "venv", str(venv_dir)], check=True)
+    clean_env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
+    clean_env["PYTHONNOUSERSITE"] = "1"
+    subprocess.run([str(creator), "-m", "venv", str(venv_dir)], check=True, env=clean_env)
     cad_python = venv_python_path(venv_dir, windows=os.name == "nt")
-    subprocess.run([str(cad_python), "-m", "pip", "install", f"{REPO_ROOT}[cad]"], check=True)
+    subprocess.run([str(cad_python), "-m", "pip", "install", f"{REPO_ROOT}[cad]"], check=True, env=clean_env)
+    smoke = subprocess.run(
+        [str(cad_python), "-c", "import build123d, OCP, trimesh, numpy, PIL"],
+        check=False,
+        env=clean_env,
+    )
+    if smoke.returncode:
+        raise SystemExit(f"CAD dependency verification failed in {cad_python}")
     print(cad_python)
     return 0
 

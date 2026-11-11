@@ -470,10 +470,26 @@ def inspect_metrics(settings: Settings, args: Mapping[str, Any]) -> dict[str, An
         metrics = inspect_step(step_file, settings)
         bed_fit = fit_to_profile(metrics, profile)
         overlaps = overlapping_solids(metrics)
-        valid = bool(metrics.get("valid_brep")) and bool(metrics.get("is_valid")) and int(metrics.get("n_solids", 0)) > 0 and bed_fit["fits"] and not overlaps
-        result = {"success": valid, "step_file": str(step_file), "metrics": metrics, "bed_fit": bed_fit, "fdm_warnings": nozzle_warnings(metrics, profile), "printer_validation": "passed" if valid else "failed"}
+        reasons: list[str] = []
+        if not metrics.get("valid_brep") or not metrics.get("is_valid"):
+            reasons.append("STEP B-rep validity failed")
+        if int(metrics.get("n_solids", 0)) < 1:
+            reasons.append("STEP contains no solids")
+        if not bed_fit["fits"]:
+            reasons.append(f"model does not fit printer profile {profile.id}: {bed_fit['failures']}")
         if overlaps:
-            result["error"] = f"STEP solids overlap in volume: {overlaps}"
+            reasons.append(f"STEP solids overlap in volume: {overlaps}")
+        valid = not reasons
+        result: dict[str, Any] = {
+            "success": valid,
+            "step_file": str(step_file),
+            "metrics": metrics,
+            "bed_fit": bed_fit,
+            "fdm_warnings": nozzle_warnings(metrics, profile),
+            "printer_validation": "passed" if valid else "failed",
+        }
+        if reasons:
+            result["error"] = "; ".join(reasons)
         return result
-    except (ConfigError, GeometryError, ExportError) as exc:
+    except (ConfigError, GeometryError, ExportError, OSError) as exc:
         return {"success": False, "error": str(exc), "printer_validation": "failed"}
