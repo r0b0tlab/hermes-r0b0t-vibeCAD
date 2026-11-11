@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from vibecad_public_plugin.config import ConfigError, project_dirs, settings_from_context
+from vibecad_public_plugin.config import ConfigError, project_dirs, project_root_for, settings_from_context
 
 
 class FakeContext:
@@ -53,3 +53,20 @@ def test_project_dirs_rejects_symlinks_leaving_project(tmp_path: Path, directory
     assert not (outside / "renders").exists()
     if not existing:
         assert not outside.exists()
+
+
+def test_project_root_for_resolves_nested_exports_without_readme(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    project = workspace / "statue"
+    mesh = project / "exports" / "mesh-abc123" / "model.stl"
+    handoff_step = project / "exports" / "handoff-revisions" / "rev999" / "source.step"
+    mesh.parent.mkdir(parents=True)
+    handoff_step.parent.mkdir(parents=True)
+    mesh.write_bytes(b"solid s\nendsolid s\n")
+    handoff_step.write_bytes(b"ISO-10303-21;")
+
+    assert project_root_for(mesh, workspace) == project
+    assert project_root_for(handoff_step, workspace) == project
+    exports_dir, renders_dir = project_dirs(project_root_for(mesh, workspace))
+    assert exports_dir == project / "exports"
+    assert renders_dir == project / "renders"

@@ -113,13 +113,21 @@ def resolve_profile(settings: Settings, args: Mapping[str, Any]) -> PrinterProfi
         raise ConfigError(str(exc)) from exc
 
 
+_PROJECT_SUBDIRS = {"source", "exports", "build", "renders"}
+
+
 def project_root_for(path: Path, workspace_root: Path) -> Path:
+    ancestors: list[Path] = []
     for parent in (path.parent, *path.parents):
         if parent == workspace_root:
             break
         if (parent / "README.md").is_file():
             return parent
-    if path.parent.name in {"source", "exports", "build", "renders"}:
+        ancestors.append(parent)
+    for parent in reversed(ancestors):
+        if parent.name in _PROJECT_SUBDIRS and parent.parent != workspace_root:
+            return parent.parent
+    if path.parent != workspace_root and path.parent.name in _PROJECT_SUBDIRS:
         return path.parent.parent
     return path.parent
 
