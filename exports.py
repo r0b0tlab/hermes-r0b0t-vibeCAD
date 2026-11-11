@@ -259,23 +259,148 @@ def inspect_step(step_file: Path, settings: Settings) -> dict[str, Any]:
     return metrics
 
 
-MESH_EXPORT_PROGRAM = r'''
+WRITE_3MF_SNIPPET = r'''
+import uuid
+import zipfile
+from xml.sax.saxutils import quoteattr
+import lib3mf
+import trimesh
+
+def write_assembly_3mf(out_path, entries):
+    rels = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+        b'</Relationships>'
+    )
+    types = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        b'<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+        b'</Types>'
+    )
+    mat_id = len(entries) + 2
+    triangle_counts = []
+    model_ids = []
+    support_ids = []
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=5) as archive:
+        archive.writestr("_rels/.rels", rels)
+        archive.writestr("[Content_Types].xml", types)
+        with archive.open("3D/3dmodel.model", "w") as stream:
+            def w(text):
+                stream.write(text.encode("utf-8"))
+            w('<?xml version="1.0" encoding="UTF-8"?>\n')
+            w('<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">\n')
+            w(' <resources>\n')
+            w(f'  <basematerials id="{mat_id}">\n')
+            for entry in entries:
+                color = (entry.get("color") or "#B4B4B4").upper()
+                w(f'   <base name={quoteattr(entry["label"])} displaycolor="{color}FF"/>\n')
+            w('  </basematerials>\n')
+            for idx, entry in enumerate(entries, 1):
+                mesh = trimesh.load_mesh(entry["stl_file"], process=True)
+                triangle_counts.append(int(len(mesh.faces)))
+                is_support = entry.get("role") in {"support", "support_interface"}
+                otype = "support" if is_support else "model"
+                if is_support:
+                    support_ids.append(idx)
+                else:
+                    model_ids.append(idx)
+                attrs = f'id="{idx}" name={quoteattr(entry["label"])} type="{otype}"'
+                if not is_support:
+                    attrs += f' pid="{mat_id}" pindex="{idx - 1}"'
+                attrs += f' p:UUID="{uuid.uuid4()}"'
+                w(f'  <object {attrs}>\n   <mesh>\n    <vertices>\n')
+                for j in range(0, len(mesh.vertices), 4096):
+                    w("".join(f'     <vertex x="{x:.9g}" y="{y:.9g}" z="{z:.9g}"/>\n' for x, y, z in mesh.vertices[j:j + 4096]))
+                w('    </vertices>\n    <triangles>\n')
+                for j in range(0, len(mesh.faces), 4096):
+                    w("".join(f'     <triangle v1="{a}" v2="{b}" v3="{c}"/>\n' for a, b, c in mesh.faces[j:j + 4096]))
+                w('    </triangles>\n   </mesh>\n  </object>\n')
+            build_ids = []
+            if len(model_ids) > 1:
+                asm_id = len(entries) + 1
+                w(f'  <object id="{asm_id}" name="vibecad_assembly" type="model" p:UUID="{uuid.uuid4()}">\n   <components>\n')
+                for mid in model_ids:
+                    w(f'    <component objectid="{mid}" p:UUID="{uuid.uuid4()}"/>\n')
+                w('   </components>\n  </object>\n')
+                build_ids.append(asm_id)
+            elif len(model_ids) == 1:
+                build_ids.append(model_ids[0])
+            build_ids.extend(support_ids)
+            w(' </resources>\n')
+            w(f' <build p:UUID="{uuid.uuid4()}">\n')
+            for bid in build_ids:
+                w(f'  <item objectid="{bid}" p:UUID="{uuid.uuid4()}"/>\n')
+            w(' </build>\n</model>\n')
+    wrapper = lib3mf.Wrapper()
+    checked = wrapper.CreateModel()
+    reader = checked.QueryReader("3mf")
+    reader.SetStrictModeActive(True)
+    reader.ReadFromFile(str(out_path))
+    return len(entries), triangle_counts
+'''
+
+MESH_EXPORT_PROGRAM = WRITE_3MF_SNIPPET + r'''
 import json
 import os
-from build123d import Mesher, export_stl, import_step
+import tempfile
+from pathlib import Path
+from build123d import Location, export_stl, import_step
 
 shape = import_step(os.environ["VIBECAD_STEP_FILE"])
 stl_path = os.environ["VIBECAD_STL_FILE"]
 three_mf_path = os.environ["VIBECAD_3MF_FILE"]
 export_stl(shape, stl_path, tolerance=0.02, angular_tolerance=0.1)
-mesher = Mesher()
-mesher.add_shape(shape, linear_deflection=0.02, angular_deflection=0.1)
-mesher.write(three_mf_path)
+
+def hex_color(paint):
+    if paint is None:
+        return "#B4B4B4"
+    try:
+        channels = tuple(paint)[:3]
+        if len(channels) == 3:
+            scale = 255.0 if max(channels) <= 1.0 else 1.0
+            r, g, b = (max(0, min(255, int(round(c * scale)))) for c in channels)
+            return f"#{r:02X}{g:02X}{b:02X}"
+    except Exception:
+        pass
+    return "#B4B4B4"
+
+def collect(node, inherited_color=None, inherited_label=None, parent_loc=None):
+    if parent_loc is None:
+        parent_loc = Location()
+    paint = getattr(node, "color", None)
+    if paint is None:
+        paint = inherited_color
+    label = getattr(node, "label", None) or inherited_label
+    if node.children:
+        loc = parent_loc * node.location
+        for child in node.children:
+            yield from collect(child, paint, label, loc)
+    else:
+        for solid in node.solids():
+            yield parent_loc * solid, getattr(solid, "label", None) or label, paint
+
+collected = list(collect(shape))
+with tempfile.TemporaryDirectory() as tmp:
+    entries = []
+    for idx, (solid, label, paint) in enumerate(collected, 1):
+        part_stl = str(Path(tmp) / f"part_{idx:03d}.stl")
+        export_stl(solid, part_stl, tolerance=0.02, angular_tolerance=0.1)
+        entries.append({
+            "label": str(label or f"solid_{idx:02d}"),
+            "stl_file": part_stl,
+            "color": hex_color(paint),
+            "role": "model",
+        })
+    mesh_count, triangle_counts = write_assembly_3mf(three_mf_path, entries)
+
 print(json.dumps({
     "stl_bytes": os.path.getsize(stl_path),
     "three_mf_bytes": os.path.getsize(three_mf_path),
-    "mesh_count": mesher.mesh_count,
-    "triangle_counts": mesher.triangle_counts,
+    "mesh_count": mesh_count,
+    "triangle_counts": triangle_counts,
     "roundtrip_skipped": True,
     "roundtrip_skip_reason": "not_performed",
 }, sort_keys=True))

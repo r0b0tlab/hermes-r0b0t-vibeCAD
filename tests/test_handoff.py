@@ -49,6 +49,62 @@ def test_stage_for_slicer_writes_generic_3mf_stls_and_manifest(tmp_path: Path) -
     for forbidden in ("target_plate", "main", "aux", "nozzle"):
         assert forbidden not in serialized
 
+    # Verify slicer-handoff.3mf is 3MF-Consortium-strict, preserves part names
+    # and #RRGGBB basematerials, and locks model/accent parts in one assembly
+    # build item so slicers never drop elevated inlays onto Z=0.
+    import xml.etree.ElementTree as ET
+    import zipfile
+    import lib3mf
+
+    wrapper = lib3mf.Wrapper()
+    model_3mf = wrapper.CreateModel()
+    reader = model_3mf.QueryReader("3mf")
+    reader.SetStrictModeActive(True)
+    reader.ReadFromFile(staged["staged_3mf"])
+    assert reader.GetWarningCount() == 0
+
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    with zipfile.ZipFile(staged["staged_3mf"]) as archive:
+        root = ET.fromstring(archive.read("3D/3dmodel.model"))
+    names = {obj.attrib.get("name") for obj in root.findall("./m:resources/m:object", ns)}
+    assert {"body_01", "accent_01"} <= names
+    colors = {base.attrib.get("displaycolor") for base in root.findall("./m:resources/m:basematerials/m:base", ns)}
+    assert {"#00AA00FF", "#FFFFFFFF"} <= colors
+    build_items = root.findall("./m:build/m:item", ns)
+    assert len(build_items) == 1
+
+
+def test_stage_for_slicer_support_role_stays_lib3mf_strict_valid(tmp_path: Path) -> None:
+    import lib3mf
+
+    workspace = tmp_path / "projects"
+    source = workspace / "demo" / "source"
+    source.mkdir(parents=True)
+    (source.parent / "README.md").write_text("# demo\n", encoding="utf-8")
+    model = source / "model.py"
+    model.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    configured = settings(workspace)
+    exported = execute_and_export(configured, {"script_path": str(model), "output_name": "demo"})
+    assert exported["success"] is True
+
+    staged = stage_for_slicer(
+        configured,
+        {
+            "step_file": exported["output"]["step"],
+            "solids_map": {
+                "body_01": {"solid_index": 1, "material": "PLA", "color": "#185398", "tool": 0, "role": "model"},
+                "accent_01": {"solid_index": 2, "material": "PLA", "color": "#F5F5EF", "tool": 1, "role": "support"},
+            },
+        },
+    )
+    assert staged["success"] is True, staged
+    wrapper = lib3mf.Wrapper()
+    model_3mf = wrapper.CreateModel()
+    reader = model_3mf.QueryReader("3mf")
+    reader.SetStrictModeActive(True)
+    reader.ReadFromFile(staged["staged_3mf"])
+    assert reader.GetWarningCount() == 0
+
 
 def test_stage_for_slicer_rejects_tool_outside_profile_range(tmp_path: Path) -> None:
     workspace = tmp_path / "projects"

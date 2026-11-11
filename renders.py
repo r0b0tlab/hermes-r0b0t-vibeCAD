@@ -111,7 +111,7 @@ light /= np.linalg.norm(light)
 def projection(name):
     x, y, z = vertices[:, 0], vertices[:, 1], vertices[:, 2]
     if name == "top": return np.column_stack((x, y)), z
-    if name == "bottom": return np.column_stack((x, y)), -z
+    if name == "bottom": return np.column_stack((-x, y)), -z
     if name == "front": return np.column_stack((x, z)), -y
     if name == "back": return np.column_stack((-x, z)), y
     if name == "right": return np.column_stack((y, z)), x

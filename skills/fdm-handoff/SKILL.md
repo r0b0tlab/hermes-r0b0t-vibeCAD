@@ -31,4 +31,4 @@ The `media` array inside a tool result does not itself populate the sidebar: the
    - P2S: every `tool` is `0` or omitted. Default slots are 1–4. Pass `ams_slot_capacity` only when the user has more than one AMS unit, and never above 20.
    - X2D: tool `0` is main, tool `1` is auxiliary. Do not reuse P2S slot caps on X2D.
 6. Slot numbers are not live AMS bindings. Do not dispatch a print. Do not claim `slicer-handoff.3mf` is a Bambu-native project. `bambu-assemble-list.json` is a recipe; a native archive is trustworthy only after that Studio build's `--info` succeeds, which this plugin does not run.
-7. Place the bed face at Z=0. P2S usable envelope is 256 × 256 × 256 mm. A 256.1 mm axis does not fit.
+7. Place the bed face at Z=0. P2S usable envelope is 256 × 256 × 256 mm. A 256.1 mm axis does not fit. When authoring intricate build123d inlays, construct algebraic `Circle(r_out) - Circle(r_in)` rings outside `with BuildSketch():` blocks (inside `BuildSketch`, `Circle()` registers a solid disk immediately) and convert scaled `import_svg` Bezier faces into sub-nozzle planar polygons so NURBS tessellation stays compact.

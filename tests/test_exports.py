@@ -43,6 +43,22 @@ def test_execute_export_inspect_and_preserve_last_good_artifacts(tmp_path: Path)
     for path in first["output"].values():
         assert Path(path).is_file() and Path(path).stat().st_size > 0
 
+    import xml.etree.ElementTree as ET
+    import zipfile
+    import lib3mf
+
+    wrapper = lib3mf.Wrapper()
+    exported_3mf = wrapper.CreateModel()
+    reader = exported_3mf.QueryReader("3mf")
+    reader.SetStrictModeActive(True)
+    reader.ReadFromFile(first["output"]["3mf"])
+    assert reader.GetWarningCount() == 0
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    with zipfile.ZipFile(first["output"]["3mf"]) as archive:
+        root = ET.fromstring(archive.read("3D/3dmodel.model"))
+    assert len(root.findall("./m:build/m:item", ns)) == 1
+    assert {"body_01", "accent_01"} <= {obj.attrib.get("name") for obj in root.findall("./m:resources/m:object", ns)}
+
     inspected = inspect_metrics(settings, {"step_file": first["output"]["step"]})
     assert inspected["success"] is True
     assert inspected["bed_fit"]["profile_id"] == "generic-fdm-220"

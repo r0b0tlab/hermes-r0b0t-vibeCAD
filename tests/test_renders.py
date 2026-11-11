@@ -321,6 +321,18 @@ def test_left_view_orientation_and_geometry_summary(tmp_path: Path) -> None:
     assert right_blue_x > right_red_x
     assert left_red_x > left_blue_x
 
+    # Verify right-handed bottom (-Z) camera flips X relative to top (+Z), not a mirror X-ray.
+    neg_x = colored_box((4, 4, 6), (-10, 0, 0), "red")
+    pos_x = colored_box((4, 4, 6), (10, 0, 0), "blue")
+    tb_path = tmp_path / "top_bottom.step"
+    export_step(Compound(children=[neg_x, pos_x]), tb_path)
+    tb = generate_preview_renders(settings, {"step_file": str(tb_path), "views": ["top", "bottom"]})
+    assert tb["success"] is True, tb
+    top_img = image(tb["renders"]["top"])
+    bot_img = image(tb["renders"]["bottom"])
+    assert np.where((top_img[:, :, 2] > 100) & (top_img[:, :, 0] == 0))[1].mean() > np.where((top_img[:, :, 0] > 100) & (top_img[:, :, 2] == 0))[1].mean()
+    assert np.where((bot_img[:, :, 0] > 100) & (bot_img[:, :, 2] == 0))[1].mean() > np.where((bot_img[:, :, 2] > 100) & (bot_img[:, :, 0] == 0))[1].mean()
+
     summary = result["geometry_summary"]
     assert summary["part_count"] == 2
     assert summary["triangle_count"] >= 24

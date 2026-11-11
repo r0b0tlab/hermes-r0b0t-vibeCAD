@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import ConfigError, Settings, cad_python, ensure_workspace, project_dirs, project_root_for, resolve_profile, resolve_workspace_file
-from .exports import ExportError, atomic_json, decode_json, inspect_step, run_cad, sha256
+from .exports import ExportError, WRITE_3MF_SNIPPET, atomic_json, decode_json, inspect_step, run_cad, sha256
 from .geometry import GeometryError, fit_to_profile, overlapping_solids
 
 
@@ -20,10 +20,10 @@ class HandoffError(ValueError):
     """Invalid material mapping or generic slicer handoff request."""
 
 
-STAGE_PROGRAM = r'''
+STAGE_PROGRAM = WRITE_3MF_SNIPPET + r'''
 import json
 import os
-from build123d import Color, MeshType, Mesher, export_stl, import_step
+from build123d import Color, export_stl, import_step
 
 shape = import_step(os.environ["VIBECAD_STEP_FILE"])
 parts = json.loads(os.environ["VIBECAD_PART_MAP"])
@@ -44,7 +44,6 @@ for entry in parts:
     named_solids = list(matches[0].solids())
     if len(named_solids) != 1 or not named_solids[0].wrapped.IsSame(solids[entry["solid_index"] - 1].wrapped):
         raise ValueError("STEP identity: label %r does not identify solid_index %s" % (entry["label"], entry["solid_index"]))
-mesher = Mesher()
 files = []
 for entry in parts:
     solid = solids[entry["solid_index"] - 1]
@@ -53,10 +52,8 @@ for entry in parts:
         solid.color = Color(entry["color"])
     export_stl(solid, entry["stl_file"], tolerance=0.02, angular_tolerance=0.1)
     files.append({"label": entry["label"], "path": entry["stl_file"], "bytes": os.path.getsize(entry["stl_file"])})
-    mesh_type = MeshType.SUPPORT if entry["role"] in {"support", "support_interface"} else MeshType.MODEL
-    mesher.add_shape(solid, linear_deflection=0.02, angular_deflection=0.1, mesh_type=mesh_type)
-mesher.write(out_path)
-print(json.dumps({"bytes": os.path.getsize(out_path), "mesh_count": mesher.mesh_count, "triangle_counts": mesher.triangle_counts, "individual_stls": files}, sort_keys=True))
+mesh_count, triangle_counts = write_assembly_3mf(out_path, parts)
+print(json.dumps({"bytes": os.path.getsize(out_path), "mesh_count": mesh_count, "triangle_counts": triangle_counts, "individual_stls": files}, sort_keys=True))
 '''
 
 
