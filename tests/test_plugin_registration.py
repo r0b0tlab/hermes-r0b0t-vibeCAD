@@ -103,3 +103,33 @@ def test_registers_skill_description_tool_descriptions_and_setting_labels() -> N
     manifest_text = (Path(__file__).resolve().parents[1] / "plugin.yaml").read_text(encoding="utf-8")
     for label in ("label: Workspace root", "label: CAD Python executable", "label: Default printer profile"):
         assert label in manifest_text
+
+
+def test_list_printer_profiles_surfaces_session_workspace_and_runtime_readiness(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    from vibecad_public_plugin import runtime
+    from vibecad_public_plugin.config import Settings
+    from vibecad_public_plugin.schemas import VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA
+
+    workspace = tmp_path / "cad-workspace"
+    workspace.mkdir()
+    settings = Settings(
+        workspace_root=workspace,
+        python_executable=Path(sys.executable),
+        printer_profile="bambu-p2s",
+        printer_profiles_file=None,
+        timeout_s=90,
+    )
+    monkeypatch.setattr(runtime, "settings_from_context", lambda _ctx: settings)
+    ctx = FakeContext()
+    load_plugin().register(ctx)
+
+    payload = json.loads(ctx.tools["vibecad_list_printer_profiles"]({}))
+    assert payload["success"] is True
+    assert payload["selected_printer_profile"] == "bambu-p2s"
+    assert payload["workspace"] == {"root": str(workspace), "exists": True}
+    assert payload["cad_runtime"]["executable"] == str(Path(sys.executable))
+    assert payload["cad_runtime"]["configured"] is True
+    assert payload["cad_runtime"]["executable_ready"] is True
+    # Top-level anyOf is rejected/stripped by strict LLM tool validators; runtime enforces XOR.
+    assert "anyOf" not in VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA["parameters"]

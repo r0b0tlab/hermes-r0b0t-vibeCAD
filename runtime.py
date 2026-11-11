@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import os
+import sys
 from typing import Any, Mapping
 
 from .adapters import load_adapters
@@ -21,8 +23,21 @@ CadError = ConfigError
 def list_printer_profiles(settings: Settings, _args: Mapping[str, Any]) -> dict[str, Any]:
     try:
         catalog = load_profile_catalog(settings.printer_profiles_file)
+        executable = settings.python_executable or Path(sys.executable)
+        exe_ready = executable.is_file() and os.access(executable, os.X_OK)
+        workspace_root = settings.workspace_root.resolve(strict=False)
         return {
             "success": True,
+            "selected_printer_profile": settings.printer_profile,
+            "workspace": {
+                "root": str(workspace_root),
+                "exists": workspace_root.is_dir(),
+            },
+            "cad_runtime": {
+                "executable": str(executable),
+                "configured": settings.python_executable is not None,
+                "executable_ready": exe_ready,
+            },
             "profiles": [
                 {
                     "id": profile.id,

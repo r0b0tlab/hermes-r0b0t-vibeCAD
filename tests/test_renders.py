@@ -285,3 +285,16 @@ def test_invalid_color_requests_fail_before_render(tmp_path: Path, colors) -> No
     path.touch()
     result = generate_preview_renders(settings, {"step_file": str(path), "part_colors": colors})
     assert not result["success"] and "part_colors" in result["error"]
+
+
+def test_stringified_views_transport_tolerance_and_rejection(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    path = tmp_path / "part.step"
+    export_step(colored_box((10, 10, 2), (0, 0, 0), "red"), path)
+    json_str = generate_preview_renders(settings, {"step_file": str(path), "views": '["top"]'})
+    csv_str = generate_preview_renders(settings, {"step_file": str(path), "views": "iso, front"})
+    assert json_str["success"] and set(json_str["renders"]) == {"top"}
+    assert csv_str["success"] and set(csv_str["renders"]) == {"iso", "front"}
+    for bad in ("", "   ", "[invalid", 123):
+        rejected = generate_preview_renders(settings, {"step_file": str(path), "views": bad})
+        assert not rejected["success"] and "views" in rejected["error"]

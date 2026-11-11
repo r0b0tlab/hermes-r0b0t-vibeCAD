@@ -252,6 +252,15 @@ def generate_preview_renders(settings: Settings, args: Mapping[str, Any]) -> dic
         step_file = resolve_workspace_file(args.get("step_file") if has_step else args.get("mesh_file"), settings,
                                            suffixes={".step", ".stp"} if has_step else {".stl"})
         requested = args.get("views", ["iso", "top", "bottom", "front", "right"])
+        if isinstance(requested, str) and requested.strip():
+            stripped = requested.strip()
+            if stripped.startswith("["):
+                try:
+                    requested = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise RenderError("views must be a non-empty array") from exc
+            else:
+                requested = [part.strip() for part in stripped.split(",") if part.strip()]
         if not isinstance(requested, list) or not requested:
             raise RenderError("views must be a non-empty array")
         allowed = {"iso", "top", "bottom", "front", "back", "right"}

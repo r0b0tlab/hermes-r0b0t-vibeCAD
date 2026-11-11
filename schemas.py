@@ -11,7 +11,7 @@ _PROFILE_ARG: dict[str, Any] = {
 
 VIBECAD_LIST_PRINTER_PROFILES_SCHEMA: dict[str, Any] = {
     "name": "vibecad_list_printer_profiles",
-    "description": "List available FDM printer profiles from bundled and configured catalogs. Does not inspect live printer hardware.",
+    "description": "List available FDM printer profiles plus the active session's configured workspace_root, default printer_profile, and CAD Python path readiness. Does not inspect live printer hardware.",
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
@@ -66,7 +66,6 @@ VIBECAD_GENERATE_PREVIEW_RENDERS_SCHEMA: dict[str, Any] = {
             "resolution": {"type": "integer", "minimum": 800, "maximum": 2048, "description": "Square output pixels per side; default 800 for full-frame, 1600 for detail. Scene is rasterized at this resolution, not upscaled."},
             "part_colors": {"type": "array", "description": "Optional solid-color overrides in imported solid traversal order; repeated cyclically if shorter. Without overrides, use available STEP colors or neutral gray.", "items": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}},
         },
-        "anyOf": [{"required": ["step_file"]}, {"required": ["mesh_file"]}],
         "additionalProperties": False,
     },
 }
