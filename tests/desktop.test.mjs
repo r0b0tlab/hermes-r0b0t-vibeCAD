@@ -8,14 +8,20 @@ const source = await readFile(new URL('../desktop/plugin.js', import.meta.url), 
 const tick = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)) }
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 
-async function setup({ media = true, nativeButtons = false } = {}) {
+async function setup({ media = true, nativeButtons = false, os = null, composer = null } = {}) {
   const atom = value => ({ get: () => value, set: next => { value = next } })
   const focusedStoredSessionId = atom(null), focusedSessionId = atom(null)
-  const history = new Map(), requests = []
+  const history = new Map(), requests = [], clipboard = [], notifications = []
   let request = async (_method, { session_id }) => ({ messages: history.get(session_id) || [] })
   const sdk = {
     atom, useValue: atom => atom.get(), EmptyState: 'EmptyState',
-    host: { state: { focusedStoredSessionId, focusedSessionId }, request: (...args) => { requests.push(args); return request(...args) } },
+    writeClipboardText: async value => { clipboard.push(value); return true },
+    host: {
+      state: { focusedStoredSessionId, focusedSessionId },
+      request: (...args) => { requests.push(args); return request(...args) },
+      notify: note => notifications.push(note),
+      ...(composer ? { composer } : {}),
+    },
     ...(media ? { TOOL_MEDIA_RENDERER_AREA: 'transcript.toolMedia' } : {}),
     ...(nativeButtons ? { Button: 'button' } : {}),
   }
@@ -32,7 +38,7 @@ async function setup({ media = true, nativeButtons = false } = {}) {
   await module.link(specifier => new vm.SyntheticModule(Object.keys(modules[specifier]), function () { for (const [key, value] of Object.entries(modules[specifier])) this.setExport(key, value) }, { context }))
   await module.evaluate()
   const registrations = []
-  module.namespace.default.register({ register: entry => registrations.push(entry) })
+  module.namespace.default.register({ register: entry => registrations.push(entry), ...(os ? { os } : {}) })
   const mediaContribution = registrations.find(c => c.area === 'transcript.toolMedia')
   const paneContribution = registrations.find(c => c.area === 'panes')
   const mount = element => {
@@ -48,7 +54,7 @@ async function setup({ media = true, nativeButtons = false } = {}) {
     }
   }
   const pane = mount(paneContribution.render())
-  return { sdk, pane, mount, registrations, mediaContribution, history, requests, setRequest: fn => { request = fn }, stored: focusedStoredSessionId, runtime: focusedSessionId }
+  return { sdk, pane, mount, registrations, mediaContribution, history, requests, clipboard, notifications, setRequest: fn => { request = fn }, stored: focusedStoredSessionId, runtime: focusedSessionId }
 }
 const rows = (...ids) => ids.map(tool_call_id => ({ role: 'tool', name: 'vibecad_generate_preview_renders', tool_call_id }))
 // A deferred tool call is stored as the bridge: the row's own name is
@@ -290,4 +296,119 @@ test('a bridge that ran another tool is not claimed, and a batch is not split', 
   ] } }])
   env.pane.render(); await tick()
   assert.deepEqual(paneNames(env), [])
+})
+
+test('fuses full-frame and detail calls sharing the same verified 64-hex source_sha256', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', bridged('full', 'detail1', 'detail2'))
+  const hash = 'b'.repeat(64)
+  const meta = { step_file: '/models/statue.step', source_sha256: hash }
+  const fullRenders = { iso: '/r/iso.png', front: '/r/front.png', top: '/r/top.png' }
+  for (const view of Object.keys(fullRenders)) card(env, { id: 'full', view, renders: fullRenders, result: meta }).component.render()
+  card(env, { id: 'detail1', view: 'front_detail_face', renders: { front_detail_face: '/r/face.png' }, result: meta }).component.render()
+  card(env, { id: 'detail2', view: 'back_detail_hand', renders: { back_detail_hand: '/r/hand.png' }, result: meta }).component.render()
+  await tick()
+  assert.deepEqual(paneNames(env), ['ISO', 'TOP', 'FRONT', 'BACK · DETAIL: HAND', 'FRONT · DETAIL: FACE'])
+  assert.match(text(env.pane.render()), /5 of 5/)
+})
+
+test('virtualized card unmount preserves ready sheet views and bounds session cache', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('one'))
+  const mounted = card(env, { id: 'one', view: 'iso', result: { step_file: '/models/keep.step', source_sha256: 'c'.repeat(64) } })
+  mounted.component.render(); await tick()
+  assert.deepEqual(paneNames(env), ['ISO'])
+  const callsBeforeUnmount = env.requests.length
+  mounted.component.unmount(); await tick()
+  assert.deepEqual(paneNames(env), ['ISO'])
+  assert.equal(env.requests.length, callsBeforeUnmount)
+
+  for (let i = 0; i < 15; i++) {
+    const sid = `bg-${i}`
+    env.history.set(sid, rows(`call-${i}`))
+    card(env, { session: sid, id: `call-${i}`, view: 'top' }).component.render()
+  }
+  await tick()
+  assert.deepEqual(paneNames(env), ['ISO'])
+})
+
+test('revision switcher and Compare prev toggle between verified revisions honestly', async () => {
+  const env = await setup(); env.stored.set('a'); env.history.set('a', rows('rev1', 'rev2'))
+  card(env, { id: 'rev1', view: 'iso', renders: { iso: '/v1/iso.png' }, result: { step_file: '/models/v1.step', source_sha256: '1'.repeat(64) } }).component.render()
+  card(env, { id: 'rev2', view: 'iso', renders: { iso: '/v2/iso.png' }, result: { step_file: '/models/v2.step', source_sha256: '2'.repeat(64) } }).component.render()
+  await tick()
+  assert.equal(preview(env).props.src, 'url:/v2/iso.png')
+  assert.doesNotMatch(text(env.pane.render()), /v1\.step/)
+
+  const compare = walk(env.pane.render()).find(n => n.type === 'button' && n.props['data-compare'])
+  assert.ok(compare)
+  compare.props.onClick()
+  let pane = env.pane.render()
+  assert.equal(preview(env).props.src, 'url:/v1/iso.png')
+  assert.match(text(pane), /Older revision/i)
+
+  walk(pane).find(n => n.type === 'button' && n.props['data-compare']).props.onClick()
+  assert.equal(preview(env).props.src, 'url:/v2/iso.png')
+})
+
+test('title block renders geometry_summary, Z-datum warning, 4x zoom, keyboard view switch and OS actions', async () => {
+  const revealed = [], copied = []
+  const env = await setup({
+    os: { revealPath: async p => { revealed.push(p); return true }, writeClipboard: async t => { copied.push(t); return true } },
+  })
+  env.stored.set('a'); env.history.set('a', rows('one'))
+  const renders = { iso: '/r/iso.png', left: '/r/left.png' }
+  const result = {
+    step_file: '/models/enclosure.step',
+    source_sha256: 'd'.repeat(64),
+    geometry_summary: { bbox_size_mm: { x: 120.5, y: 80, z: 45.25 }, z_min_mm: -1.5, part_count: 2, triangle_count: 480 },
+  }
+  for (const view of Object.keys(renders)) card(env, { renders, view, result }).component.render()
+  await tick()
+  let pane = env.pane.render(), body = text(pane)
+  assert.match(body, /120\.5 × 80 × 45\.25 mm/)
+  assert.match(body, /Zmin -1\.5 mm/)
+  assert.match(body, /off Z=0/i)
+
+  await walk(pane).find(n => n.type === 'button' && n.props['data-action'] === 'reveal-model').props.onClick()
+  await walk(pane).find(n => n.type === 'button' && n.props['data-action'] === 'copy-hash').props.onClick()
+  assert.deepEqual(revealed, ['/models/enclosure.step'])
+  assert.ok(copied.includes('d'.repeat(64)) || env.clipboard.includes('d'.repeat(64)))
+
+  walk(pane).find(n => n.type === 'button' && text(n) === 'Zoom 4×').props.onClick()
+  assert.equal(preview(env).props.style.width, '400%')
+  walk(env.pane.render()).find(n => n.type === 'button' && text(n) === 'Fit').props.onClick()
+  assert.equal(preview(env).props.style.width, '100%')
+
+  const section = env.pane.render()
+  section.props.onKeyDown({ key: ']', metaKey: true, preventDefault() {} })
+  assert.equal(preview(env).props.src, 'url:/r/iso.png')
+  section.props.onKeyDown({ key: ']', preventDefault() {} })
+  assert.equal(preview(env).props.src, 'url:/r/left.png')
+})
+
+test('interactive drag-to-crop region loupe computes normalized bounds and inserts composer prompt', async () => {
+  const inserted = []
+  const env = await setup({
+    composer: { insertText: async (sid, prompt) => { inserted.push([sid, prompt]); return true } },
+  })
+  env.stored.set('a'); env.history.set('a', rows('one'))
+  card(env, { view: 'front', renders: { front: '/r/front.png' }, result: { step_file: '/models/clip.step', source_sha256: 'e'.repeat(64) } }).component.render()
+  await tick()
+
+  walk(env.pane.render()).find(n => n.type === 'button' && n.props['data-action'] === 'toggle-crop').props.onClick()
+  const findViewport = () => walk(env.pane.render()).find(n => n.props?.['data-pan-viewport'])
+  const boxTarget = {
+    getBoundingClientRect: () => ({ left: 100, top: 200, width: 200, height: 200 }),
+    setPointerCapture() {}, releasePointerCapture() {}, hasPointerCapture: () => true,
+  }
+  findViewport().props.onPointerDown({ button: 0, pointerId: 7, clientX: 150, clientY: 220, currentTarget: boxTarget, preventDefault() {} })
+  findViewport().props.onPointerMove({ pointerId: 7, clientX: 250, clientY: 320, currentTarget: boxTarget })
+  findViewport().props.onPointerUp({ pointerId: 7, currentTarget: boxTarget })
+
+  const pane = env.pane.render()
+  assert.ok(walk(pane).find(n => n.props?.['data-region-box']))
+  await walk(pane).find(n => n.type === 'button' && n.props['data-action'] === 'insert-crop-prompt').props.onClick()
+  assert.equal(inserted.length, 1)
+  assert.equal(inserted[0][0], 'a')
+  assert.match(inserted[0][1], /vibecad_generate_preview_renders/)
+  assert.match(inserted[0][1], /"x_min":0\.25.*"y_min":0\.1.*"x_max":0\.75.*"y_max":0\.6/)
 })
