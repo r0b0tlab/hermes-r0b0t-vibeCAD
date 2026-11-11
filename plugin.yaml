@@ -1,5 +1,5 @@
 name: hermes-r0b0t-vibeCAD
-version: 0.4.0
+version: 0.4.1
 description: "Profile-driven build123d CAD and local STL mesh preparation for FDM printers, with bed-fit refusals, detail previews, and Bambu X2D / P2S handoffs. Executes trusted workspace models locally; does not dispatch prints or bind a live AMS."
 author: "r0b0t / Hermes Agent"
 license: MIT

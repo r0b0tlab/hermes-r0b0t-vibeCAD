@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — Hermes session discovery & Desktop CAD workstation
+
+- Pass bundled `fdm-handoff` skill frontmatter/description and per-tool descriptions at registration so Hermes lists trigger guidance in `<available_skills>` and tool metadata surfaces; add human-readable labels to `config_schema`.
+- Return `workspace` (`root`, `exists`), `selected_printer_profile`, and `cad_runtime` readiness in `vibecad_list_printer_profiles` to eliminate cold-start workspace path guessing; drop provider-fragile top-level `anyOf` from the preview schema and tolerate stringified `views` transport payloads.
+- Resolve `project_root_for` across nested `exports/mesh-<uuid>` and `exports/handoff-revisions/<uuid>` paths even when `README.md` is absent; return actionable `error` strings on `inspect_metrics` fit/datum failures; clean up temporary files on `modify_parameter` I/O errors; verify CAD imports in `scripts/bootstrap.py` with sanitized `PYTHONPATH`.
+- Add `left` (`-X`) orthographic previews and zero-extra-subprocess `geometry_summary` (`bbox_size_mm`, `z_min_mm`, `part_count`, `triangle_count`) to `vibecad_generate_preview_renders`.
+- Upgrade `desktop/plugin.js` (strictly within `@hermes/plugin-sdk`): fuse full-frame and detail calls sharing a verified 64-hex `source_sha256` into one sheet, display Title-Block dimensions and bed-datum warnings, add `Compare prev` revision A/B toggling, `4×` zoom, `[` / `]` keyboard view navigation, `Reveal file` / `Copy SHA-256` actions, interactive drag-to-crop `Select region` → Composer prompt insertion, unmount resilience, and bounded session/candidate LRU caches.
+- Run `hermes plugins validate .` alongside `hermes plugins doctor . --ci` in GitHub Actions CI.
+
 ## 0.4.0 — reliability and Desktop audit
 
 - Keep local build123d as the default workflow; Meshy remains a separate opt-in provider with its own API key and paid-call approvals. Do not silently switch when either path is unavailable.

@@ -43,3 +43,4 @@ jobs:
           path: hermes-agent
       - run: uv sync --directory hermes-agent
       - run: HERMES_HOME="$(mktemp -d)" hermes-agent/.venv/bin/hermes plugins doctor . --ci
+      - run: HERMES_HOME="$(mktemp -d)" hermes-agent/.venv/bin/hermes plugins validate .
