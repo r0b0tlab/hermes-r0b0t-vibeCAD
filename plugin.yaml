@@ -23,21 +23,26 @@ python_runtime: external
 config_schema:
   workspace_root:
     type: str
+    label: Workspace root
     default: "~/vibecad-projects"
     description: "Trusted workspace root containing CAD projects."
   python_executable:
     type: str
+    label: CAD Python executable
     default: ""
-    description: "Python interpreter with the CAD extra installed; empty means current interpreter if dependencies are present."
+    description: "Python 3.12/3.13 interpreter with the CAD extra installed; empty uses current interpreter if dependencies are present."
   printer_profile:
     type: str
+    label: Default printer profile
     default: ""
-    description: "Required printer profile id. Bundled ids: generic-fdm-220, bambu-x2d, bambu-p2s."
+    description: "Required printer profile id. Bundled ids: generic-fdm-220, bambu-x2d, bambu-p2s (or any id from printer_profiles_file)."
   printer_profiles_file:
     type: str
+    label: Custom printer profiles JSON
     default: ""
     description: "Optional JSON printer-profile catalog; empty uses bundled profiles."
   timeout_s:
     type: int
+    label: CAD subprocess timeout (seconds)
     default: 120
     description: "Per-CAD subprocess timeout, clamped to 1..300 seconds."

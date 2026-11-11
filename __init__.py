@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -13,6 +14,30 @@ def _payload(value: Mapping[str, Any]) -> str:
 
 
 _EXECUTE_TOOL = "vibecad_execute_and_export"
+_DEFAULT_SKILL_DESCRIPTION = (
+    "Use when a vibeCAD FDM model must fit a printer and show drawings. "
+    "Run the plugin tools, do not approximate them."
+)
+
+
+def _skill_frontmatter(skill_md: Path) -> tuple[str, dict[str, str]]:
+    try:
+        text = skill_md.read_text(encoding="utf-8-sig")
+    except OSError:
+        return _DEFAULT_SKILL_DESCRIPTION, {"description": _DEFAULT_SKILL_DESCRIPTION}
+    frontmatter: dict[str, str] = {}
+    if text.startswith("---"):
+        end = re.search(r"\n---\s*\n", text[3:])
+        if end:
+            for line in text[3 : end.start() + 3].splitlines():
+                if ":" in line:
+                    key, raw = line.split(":", 1)
+                    value = raw.strip().strip("\"'")
+                    if key.strip() and value:
+                        frontmatter[key.strip()] = value
+    description = frontmatter.get("description") or _DEFAULT_SKILL_DESCRIPTION
+    frontmatter.setdefault("description", description)
+    return description, frontmatter
 
 
 def _script_snapshot(settings: Any, args: Mapping[str, Any]) -> tuple[Path, bytes, str]:
@@ -24,8 +49,11 @@ def _script_snapshot(settings: Any, args: Mapping[str, Any]) -> tuple[Path, byte
 
 
 def _approval_message(path: Path, digest: str) -> str:
-    return (f"Execute trusted Python model {path} (SHA-256: {digest}). "
-            "Python has host filesystem and network access; this is not a sandbox.")
+    return (
+        f"Execute trusted Python model {path} (SHA-256: {digest}). "
+        "Python has host filesystem and network access; this is not a sandbox. "
+        "('Allow for session' reuses this SHA-256 across pre-check and final byte verification.)"
+    )
 
 
 def register(ctx: Any) -> None:
@@ -72,13 +100,26 @@ def register(ctx: Any) -> None:
             except Exception as exc:
                 return _payload({"success": False, "error": f"vibeCAD internal error: {type(exc).__name__}: {exc}"})
 
-        ctx.register_tool(name=name, toolset="vibecad", schema=schema, handler=handler, emoji=emoji)
+        ctx.register_tool(
+            name=name,
+            toolset="vibecad",
+            schema=schema,
+            handler=handler,
+            description=str(schema.get("description") or ""),
+            emoji=emoji,
+        )
 
     skill_md = Path(__file__).resolve().parent / "skills" / "fdm-handoff" / "SKILL.md"
     register_skill = getattr(ctx, "register_skill", None)
     if register_skill is not None and skill_md.is_file():
+        skill_desc, skill_fm = _skill_frontmatter(skill_md)
         try:
-            register_skill("fdm-handoff", skill_md)
+            register_skill("fdm-handoff", skill_md, description=skill_desc, frontmatter=skill_fm)
+        except TypeError:
+            try:
+                register_skill("fdm-handoff", skill_md)
+            except Exception:
+                pass
         except Exception:
             # A skill registration failure must not drop the CAD tools.
             pass

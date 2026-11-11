@@ -24,6 +24,8 @@ class FakeContext:
         self.skills: dict[str, object] = {}
         self.schemas: dict[str, object] = {}
         self.hooks: dict[str, object] = {}
+        self.tool_kwargs: dict[str, dict[str, object]] = {}
+        self.skill_kwargs: dict[str, dict[str, object]] = {}
 
     def register_hook(self, name: str, callback: object) -> None:
         self.hooks[name] = callback
@@ -31,12 +33,14 @@ class FakeContext:
     def get_config(self, key: str, default: object = None) -> object:
         return default
 
-    def register_tool(self, *, name: str, handler: object, schema: object, **_kwargs: object) -> None:
+    def register_tool(self, *, name: str, handler: object, schema: object, **kwargs: object) -> None:
         self.tools[name] = handler
         self.schemas[name] = schema
+        self.tool_kwargs[name] = dict(kwargs)
 
-    def register_skill(self, name: str, path: object, **_kwargs: object) -> None:
+    def register_skill(self, name: str, path: object, **kwargs: object) -> None:
         self.skills[name] = path
+        self.skill_kwargs[name] = dict(kwargs)
 
 
 def test_registers_the_public_namespaced_toolset() -> None:
@@ -76,3 +80,26 @@ def test_registered_preview_tool_real_detail_payload(tmp_path, monkeypatch) -> N
     assert payload["source_step_sha256"] == hashlib.sha256(step.read_bytes()).hexdigest()
     assert payload["render_sha256"][key] == hashlib.sha256(Path(payload["renders"][key]).read_bytes()).hexdigest()
     assert payload["media"] == [f"MEDIA:{payload['renders'][key]}"]
+
+
+def test_registers_skill_description_tool_descriptions_and_setting_labels() -> None:
+    plugin = load_plugin()
+    ctx = FakeContext()
+    plugin.register(ctx)
+
+    # Hermes prompt_builder reads description/frontmatter from register_skill(), not disk.
+    skill_meta = ctx.skill_kwargs["fdm-handoff"]
+    desc = str(skill_meta.get("description") or "")
+    assert "vibeCAD" in desc and "printer" in desc
+    assert isinstance(skill_meta.get("frontmatter"), dict)
+    assert skill_meta["frontmatter"].get("description") == desc
+
+    # Every registered tool forwards its schema description to registry metadata.
+    for name in EXPECTED_TOOLS:
+        registered_desc = str(ctx.tool_kwargs[name].get("description") or "")
+        assert registered_desc == ctx.schemas[name]["description"]
+        assert len(registered_desc) >= 20
+
+    manifest_text = (Path(__file__).resolve().parents[1] / "plugin.yaml").read_text(encoding="utf-8")
+    for label in ("label: Workspace root", "label: CAD Python executable", "label: Default printer profile"):
+        assert label in manifest_text
